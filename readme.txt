@@ -5,7 +5,7 @@ Tags: maintenance, coming soon, offline, 503, custom page
 Requires at least: 5.8
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.15
+Stable tag: 1.17
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -15,12 +15,16 @@ A lightweight WordPress plugin that displays a customisable maintenance page to 
 
 Bonsai Digital Maintenance Mode shows a friendly, customisable maintenance page for non-logged-in visitors. Logged-in administrators can continue working normally.
 
-* Sends proper **503 Service Unavailable** headers with `Retry-After`.
+* Sends proper **503 Service Unavailable** headers with `Retry-After`, calculated from your scheduled end time when set.
 * Responsive, branded template with **background image**.
 * **Background colour** and **font colour** pickers for full visual control.
+* **Media library picker** for logo and background image, with thumbnail preview.
 * **Editable badge text** and **header text**.
 * **WYSIWYG editor** for main content (paragraphs, lists, headings).
 * **Toggle main content on/off** (background-only mode).
+* **Scheduled start/end datetime** — auto turns maintenance mode on/off without you remembering to flip the switch.
+* **Preview bypass link** — a secret `?cmm_preview=TOKEN` URL to share with clients so they can view the live site without wp-admin access.
+* **IP allowlist** — always let specific IPs through, no login required.
 * **Basic SEO**: custom page title + meta description (still `noindex, nofollow`).
 * Optional override of WordPress' core `wp-content/maintenance.php`.
 * Writes static snapshot to `wp-content/maintenance-template.html`.
@@ -52,9 +56,18 @@ Bonsai Digital Maintenance Mode shows a friendly, customisable maintenance page 
 * **Enable Maintenance Mode** (`cmm_enabled`) — Master switch
 * **Override WP Maintenance Page** (`cmm_override_wp_maintenance`) — Replace `wp-content/maintenance.php`
 
+= Schedule =
+* **Enable Scheduled Maintenance** (`cmm_schedule_enabled`) — When on, the dates below control maintenance mode instead of the manual toggle
+* **Start** (`cmm_schedule_start`) — Leave blank to start immediately once enabled
+* **End** (`cmm_schedule_end`) — Leave blank to require manual turn-off; also drives the `Retry-After` header
+
+= Preview & Access =
+* **Preview Token** (`cmm_preview_token`) — Set a token, save, and share the generated `?cmm_preview=TOKEN` link with clients to bypass maintenance mode without wp-admin access
+* **IP Allowlist** (`cmm_ip_allowlist`) — Comma/newline separated IPs that always bypass maintenance mode
+
 = Design =
-* **Header Logo (URL)** (`cmm_logo`) — Optional logo
-* **Background Image (URL)** (`cmm_background_image`) — Full-page background
+* **Header Logo** (`cmm_logo`) — Optional logo, chosen via the media library
+* **Background Image** (`cmm_background_image`) — Full-page background, chosen via the media library
 * **Background Colour** (`cmm_bg_colour`) — Page background colour (default `#ffffff`)
 * **Font Colour** (`cmm_font_colour`) — Body text colour (default `#111111`)
 
@@ -106,6 +119,12 @@ Bonsai Digital Maintenance Mode shows a friendly, customisable maintenance page 
 * **Headers already sent?** Another plugin/theme may print too early; this plugin runs on `template_redirect`.
 
 == Changelog ==
+
+= 1.17 =
+* Add preview bypass link (`cmm_preview_token`) — share a `?cmm_preview=TOKEN` URL with clients to view the live site during maintenance, no wp-admin access needed.
+* Add scheduled start/end datetime — auto-enables/disables maintenance mode and drives the `Retry-After` header.
+* Add IP allowlist — comma/newline separated IPs that always bypass the gate.
+* Add media library picker for Header Logo and Background Image, with thumbnail preview and remove button.
 
 = 1.15 =
 * Add background colour picker option (`cmm_bg_colour`).

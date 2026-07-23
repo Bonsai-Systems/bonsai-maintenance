@@ -21,6 +21,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.17] - 2026-07-23
+
+### Added
+- [bonsai-maintenance.php] Preview bypass link (`cmm_preview_token`) — a shareable `?cmm_preview=TOKEN` URL that lets clients view the live site during maintenance without wp-admin access; sets a signed cookie so the token doesn't need to stay in the URL on every page
+- [bonsai-maintenance.php] Scheduled start/end datetime (`cmm_schedule_enabled`, `cmm_schedule_start`, `cmm_schedule_end`) — auto-enables/disables maintenance mode without relying on the manual toggle
+- [bonsai-maintenance.php] `Retry-After` header now calculated from the scheduled end time when set, falling back to 3600 seconds
+- [bonsai-maintenance.php] IP allowlist (`cmm_ip_allowlist`) — comma/newline separated IPs that always bypass the maintenance gate
+- [bonsai-maintenance.php] Media library picker (`cmm_render_media_field()`) replacing plain URL inputs for Header Logo and Background Image, with thumbnail preview and remove button
+- [bonsai-maintenance.php] New settings sections: Schedule, Preview & Access
+
+### Changed
+- [bonsai-maintenance.php] Front-end gate now checks `cmm_is_maintenance_active()` instead of reading `cmm_enabled` directly, so scheduling and the manual toggle share one code path
+
+---
+
 ## [1.16] - 2026-07-23
 
 ### Fixed

@@ -9,12 +9,16 @@ A lightweight WordPress plugin that displays a customisable maintenance page to 
 
 ## Features
 
-- Sends proper **503 Service Unavailable** + `Retry-After`
+- Sends proper **503 Service Unavailable** + `Retry-After` (calculated from the scheduled end time when set)
 - Clean, responsive template with **background image**
+- **Media library picker** for logo and background image, with thumbnail preview
 - **Editable badge** and **header text**
 - **WYSIWYG** main content (lists, headings, links)
 - **Toggle** to show/hide all on-page content (background-only mode)
 - **Background colour** and **font colour** pickers for full visual control
+- **Scheduled start/end datetime** — auto-enable/disable without a manual toggle
+- **Preview bypass link** — shareable `?cmm_preview=TOKEN` URL for client previews without wp-admin access
+- **IP allowlist** — always let specific IPs through
 - **Basic SEO**: custom page title + meta description (still `noindex, nofollow`)
 - Optional override of WordPress' maintenance screen
 - Writes **static HTML snapshot** to `wp-content/maintenance-template.html`
@@ -68,11 +72,24 @@ Navigate to **Settings → Maintenance Mode** to configure.
 | Enable Maintenance Mode | `cmm_enabled` | Master switch |
 | Override WP Maintenance Page | `cmm_override_wp_maintenance` | Replace `wp-content/maintenance.php` |
 
+### Schedule
+| Option | Key | Description |
+|--------|-----|-------------|
+| Enable Scheduled Maintenance | `cmm_schedule_enabled` | When on, dates below control maintenance mode instead of the manual toggle |
+| Start | `cmm_schedule_start` | Leave blank to start immediately once enabled |
+| End | `cmm_schedule_end` | Leave blank to require manual turn-off; also drives `Retry-After` |
+
+### Preview & Access
+| Option | Key | Description |
+|--------|-----|-------------|
+| Preview Token | `cmm_preview_token` | Set + save to generate a `?cmm_preview=TOKEN` link that bypasses maintenance mode for anyone who has it |
+| IP Allowlist | `cmm_ip_allowlist` | Comma/newline separated IPs that always bypass maintenance mode |
+
 ### Design
 | Option | Key | Description |
 |--------|-----|-------------|
-| Header Logo (URL) | `cmm_logo` | Optional logo image |
-| Background Image (URL) | `cmm_background_image` | Full-page background photo |
+| Header Logo | `cmm_logo` | Optional logo image, chosen via the media library |
+| Background Image | `cmm_background_image` | Full-page background photo, chosen via the media library |
 | Background Colour | `cmm_bg_colour` | Page background colour (default: `#ffffff`) |
 | Font Colour | `cmm_font_colour` | Body text colour (default: `#111111`) |
 

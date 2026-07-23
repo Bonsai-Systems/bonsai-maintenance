@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Bonsai Digital Maintenance Mode
  * Description: Displays a customisable maintenance page for non-logged-in users, and can replace the standard WordPress maintenance screen.
- * Version: 1.16
+ * Version: 1.17
  * Author: Ben Ervine / The Bonsai Digital Collective
  * Author URI: https://thebonsaidigitalcollective.co.uk
  * Text Domain: bonsai-maintenance
@@ -52,7 +52,7 @@ add_action( 'template_redirect', 'cmm_enable_maintenance_mode', 1 );
  * Passes through admin, REST, AJAX, cron, feed, and admin users.
  */
 function cmm_enable_maintenance_mode() {
-	if ( ! get_option( 'cmm_enabled' ) ) {
+	if ( ! cmm_is_maintenance_active() ) {
 		return;
 	}
 	if ( is_admin() ) {
@@ -79,13 +79,141 @@ function cmm_enable_maintenance_mode() {
 	if ( is_feed() ) {
 		return;
 	}
+	if ( cmm_check_preview_bypass() ) {
+		return;
+	}
+	if ( cmm_check_ip_allowlist() ) {
+		return;
+	}
 
 	status_header( 503 );
 	header( 'Content-Type: text/html; charset=utf-8' );
-	header( 'Retry-After: 3600' );
+	header( 'Retry-After: ' . cmm_get_retry_after() );
 	// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- fully escaped inside render function
 	echo cmm_render_maintenance_page();
 	exit;
+}
+
+/**
+ * Determines whether maintenance mode is currently active, accounting for
+ * the manual toggle and the optional start/end schedule.
+ *
+ * @return bool True if visitors should see the maintenance page.
+ */
+function cmm_is_maintenance_active() {
+	if ( ! get_option( 'cmm_schedule_enabled' ) ) {
+		return (bool) get_option( 'cmm_enabled' );
+	}
+
+	$now   = time();
+	$start = get_option( 'cmm_schedule_start', '' );
+	$end   = get_option( 'cmm_schedule_end', '' );
+
+	$start_ts = $start ? strtotime( $start ) : false;
+	$end_ts   = $end ? strtotime( $end ) : false;
+
+	if ( $start_ts && $now < $start_ts ) {
+		return false;
+	}
+	if ( $end_ts && $now > $end_ts ) {
+		return false;
+	}
+	if ( ! $start_ts && ! $end_ts ) {
+		// Schedule enabled but no dates set — fall back to the manual toggle.
+		return (bool) get_option( 'cmm_enabled' );
+	}
+
+	return true;
+}
+
+/**
+ * Calculates a Retry-After value in seconds. Uses the scheduled end time
+ * when available, otherwise falls back to a default of one hour.
+ *
+ * @return int Seconds until the client should retry.
+ */
+function cmm_get_retry_after() {
+	if ( get_option( 'cmm_schedule_enabled' ) ) {
+		$end    = get_option( 'cmm_schedule_end', '' );
+		$end_ts = $end ? strtotime( $end ) : false;
+
+		if ( $end_ts && $end_ts > time() ) {
+			return max( 60, $end_ts - time() );
+		}
+	}
+
+	return 3600;
+}
+
+/**
+ * Returns the visitor's IP address, sanitised.
+ *
+ * @return string Sanitised IP address, or an empty string if unavailable.
+ */
+function cmm_visitor_ip() {
+	if ( empty( $_SERVER['REMOTE_ADDR'] ) ) {
+		return '';
+	}
+	$ip = sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) );
+	return filter_var( $ip, FILTER_VALIDATE_IP ) ? $ip : '';
+}
+
+/**
+ * Checks the current visitor's IP against the configured allowlist.
+ *
+ * @return bool True if the visitor's IP is on the allowlist.
+ */
+function cmm_check_ip_allowlist() {
+	$list = get_option( 'cmm_ip_allowlist', '' );
+	if ( '' === trim( $list ) ) {
+		return false;
+	}
+
+	$visitor_ip = cmm_visitor_ip();
+	if ( '' === $visitor_ip ) {
+		return false;
+	}
+
+	$allowed = preg_split( '/[\s,]+/', $list, -1, PREG_SPLIT_NO_EMPTY );
+
+	return in_array( $visitor_ip, $allowed, true );
+}
+
+/**
+ * Checks for a valid preview bypass token, either via the `cmm_preview`
+ * query parameter or a cookie set by a previous valid request. Sets the
+ * bypass cookie on successful token match so the client doesn't need to
+ * keep the query parameter on every page.
+ *
+ * @return bool True if the visitor should bypass maintenance mode.
+ */
+function cmm_check_preview_bypass() {
+	$token = get_option( 'cmm_preview_token', '' );
+	if ( '' === $token ) {
+		return false;
+	}
+
+	$cookie_name  = 'cmm_preview_bypass';
+	$expected_val = hash( 'sha256', $token );
+
+	if ( isset( $_GET['cmm_preview'] ) ) {
+		$supplied = sanitize_text_field( wp_unslash( $_GET['cmm_preview'] ) );
+		if ( hash_equals( $token, $supplied ) ) {
+			if ( ! headers_sent() ) {
+				setcookie( $cookie_name, $expected_val, time() + DAY_IN_SECONDS, COOKIEPATH ?: '/', COOKIE_DOMAIN, is_ssl(), true );
+			}
+			return true;
+		}
+	}
+
+	if ( isset( $_COOKIE[ $cookie_name ] ) ) {
+		$cookie_val = sanitize_text_field( wp_unslash( $_COOKIE[ $cookie_name ] ) );
+		if ( hash_equals( $expected_val, $cookie_val ) ) {
+			return true;
+		}
+	}
+
+	return false;
 }
 
 /*
@@ -295,6 +423,87 @@ add_action( 'admin_menu', function () {
 } );
 
 /**
+ * Loads the WP media library JS only on our settings screen.
+ *
+ * @param string $hook_suffix Current admin page hook suffix.
+ */
+add_action( 'admin_enqueue_scripts', function ( $hook_suffix ) {
+	if ( 'settings_page_cmm-settings' !== $hook_suffix ) {
+		return;
+	}
+	wp_enqueue_media();
+	wp_add_inline_script( 'media-editor', cmm_media_picker_js() );
+} );
+
+/**
+ * Returns the inline JS that powers the "Choose Image" / "Remove" buttons
+ * for the logo and background image fields.
+ *
+ * @return string JS source.
+ */
+function cmm_media_picker_js() {
+	return <<<'JS'
+( function ( $ ) {
+	$( document ).on( 'click', '.cmm-media-select', function ( e ) {
+		e.preventDefault();
+		var button    = $( this );
+		var fieldName = button.data( 'field' );
+		var input     = $( '#' + fieldName );
+		var preview   = $( '#' + fieldName + '_preview' );
+		var removeBtn = $( '#' + fieldName + '_remove' );
+
+		var frame = wp.media( {
+			title: 'Select Image',
+			button: { text: 'Use this image' },
+			multiple: false
+		} );
+
+		frame.on( 'select', function () {
+			var attachment = frame.state().get( 'selection' ).first().toJSON();
+			input.val( attachment.url );
+			preview.attr( 'src', attachment.url ).show();
+			removeBtn.show();
+		} );
+
+		frame.open();
+	} );
+
+	$( document ).on( 'click', '.cmm-media-remove', function ( e ) {
+		e.preventDefault();
+		var fieldName = $( this ).data( 'field' );
+		$( '#' + fieldName ).val( '' );
+		$( '#' + fieldName + '_preview' ).hide().attr( 'src', '' );
+		$( this ).hide();
+	} );
+} )( jQuery );
+JS;
+}
+
+/**
+ * Renders a URL text field paired with a media-library picker button,
+ * remove button, and thumbnail preview.
+ *
+ * @param string $field_name Option/field name.
+ * @param string $value      Current field value (image URL).
+ */
+function cmm_render_media_field( $field_name, $value ) {
+	printf(
+		'<input type="url" name="%1$s" id="%1$s" value="%2$s" class="regular-text" placeholder="%3$s">
+		<button type="button" class="button cmm-media-select" data-field="%1$s">%4$s</button>
+		<button type="button" class="button cmm-media-remove" data-field="%1$s" id="%1$s_remove" style="%5$s">%6$s</button>
+		<br>
+		<img id="%1$s_preview" src="%2$s" style="max-width:150px;height:auto;margin-top:8px;%7$s">',
+		esc_attr( $field_name ),
+		esc_attr( $value ),
+		esc_attr__( 'https://example.com/image.jpg', 'bonsai-maintenance' ),
+		esc_html__( 'Choose Image', 'bonsai-maintenance' ),
+		$value ? '' : 'display:none;',
+		esc_html__( 'Remove', 'bonsai-maintenance' ),
+		$value ? '' : 'display:none;'
+	);
+}
+
+/**
  * Renders the settings page wrapper.
  */
 function cmm_settings_page() {
@@ -324,6 +533,15 @@ add_action( 'admin_init', function () {
 	register_setting( 'cmm_settings', 'cmm_override_wp_maintenance',    [ 'type' => 'boolean', 'sanitize_callback' => 'cmm_sanitize_checkbox', 'default' => 0 ] );
 	register_setting( 'cmm_settings', 'cmm_show_main_content',          [ 'type' => 'boolean', 'sanitize_callback' => 'cmm_sanitize_checkbox', 'default' => 1 ] );
 
+	// Schedule.
+	register_setting( 'cmm_settings', 'cmm_schedule_enabled', [ 'type' => 'boolean', 'sanitize_callback' => 'cmm_sanitize_checkbox',  'default' => 0 ] );
+	register_setting( 'cmm_settings', 'cmm_schedule_start',   [ 'type' => 'string',  'sanitize_callback' => 'cmm_sanitize_datetime', 'default' => '' ] );
+	register_setting( 'cmm_settings', 'cmm_schedule_end',     [ 'type' => 'string',  'sanitize_callback' => 'cmm_sanitize_datetime', 'default' => '' ] );
+
+	// Access.
+	register_setting( 'cmm_settings', 'cmm_preview_token', [ 'type' => 'string', 'sanitize_callback' => 'cmm_sanitize_line',     'default' => '' ] );
+	register_setting( 'cmm_settings', 'cmm_ip_allowlist',  [ 'type' => 'string', 'sanitize_callback' => 'cmm_sanitize_ip_list',  'default' => '' ] );
+
 	// Design.
 	register_setting( 'cmm_settings', 'cmm_logo',             [ 'type' => 'string', 'sanitize_callback' => 'esc_url_raw',        'default' => '' ] );
 	register_setting( 'cmm_settings', 'cmm_background_image', [ 'type' => 'string', 'sanitize_callback' => 'esc_url_raw',        'default' => '' ] );
@@ -350,7 +568,9 @@ add_action( 'admin_init', function () {
 	 * Sections
 	 * -------------------------------------------------------------------------
 	 */
-	add_settings_section( 'cmm_section_status',  __( 'Status', 'bonsai-maintenance' ),       '__return_false', 'cmm-settings' );
+	add_settings_section( 'cmm_section_status',   __( 'Status', 'bonsai-maintenance' ),         '__return_false', 'cmm-settings' );
+	add_settings_section( 'cmm_section_schedule', __( 'Schedule', 'bonsai-maintenance' ),       '__return_false', 'cmm-settings' );
+	add_settings_section( 'cmm_section_access',   __( 'Preview & Access', 'bonsai-maintenance' ), '__return_false', 'cmm-settings' );
 	add_settings_section( 'cmm_section_design',  __( 'Design', 'bonsai-maintenance' ),       '__return_false', 'cmm-settings' );
 	add_settings_section( 'cmm_section_content', __( 'Content', 'bonsai-maintenance' ),      '__return_false', 'cmm-settings' );
 	add_settings_section( 'cmm_section_social',  __( 'Social Links', 'bonsai-maintenance' ), '__return_false', 'cmm-settings' );
@@ -387,23 +607,95 @@ add_action( 'admin_init', function () {
 	}, 'cmm-settings', 'cmm_section_status' );
 
 	/*
+	 * Fields — Schedule
+	 * -------------------------------------------------------------------------
+	 */
+	add_settings_field( 'cmm_schedule_enabled', __( 'Enable Scheduled Maintenance', 'bonsai-maintenance' ), function () {
+		printf(
+			'<label><input type="checkbox" name="cmm_schedule_enabled" value="1" %s> %s</label><p class="description">%s</p>',
+			checked( 1, (int) get_option( 'cmm_schedule_enabled' ), false ),
+			esc_html__( 'Auto on/off using the dates below', 'bonsai-maintenance' ),
+			esc_html__( 'When enabled, the dates below control maintenance mode instead of the manual toggle above.', 'bonsai-maintenance' )
+		);
+	}, 'cmm-settings', 'cmm_section_schedule' );
+
+	add_settings_field( 'cmm_schedule_start', __( 'Start', 'bonsai-maintenance' ), function () {
+		printf(
+			'<input type="datetime-local" name="cmm_schedule_start" value="%s"><p class="description">%s</p>',
+			esc_attr( get_option( 'cmm_schedule_start', '' ) ),
+			esc_html__( 'Leave blank to start immediately once enabled.', 'bonsai-maintenance' )
+		);
+	}, 'cmm-settings', 'cmm_section_schedule' );
+
+	add_settings_field( 'cmm_schedule_end', __( 'End', 'bonsai-maintenance' ), function () {
+		printf(
+			'<input type="datetime-local" name="cmm_schedule_end" value="%s"><p class="description">%s</p>',
+			esc_attr( get_option( 'cmm_schedule_end', '' ) ),
+			esc_html__( 'Leave blank to require manual turn-off. Also used to calculate the Retry-After header.', 'bonsai-maintenance' )
+		);
+	}, 'cmm-settings', 'cmm_section_schedule' );
+
+	/*
+	 * Fields — Access
+	 * -------------------------------------------------------------------------
+	 */
+	add_settings_field( 'cmm_preview_token', __( 'Preview Token', 'bonsai-maintenance' ), function () {
+		$token = get_option( 'cmm_preview_token', '' );
+		$link  = $token ? add_query_arg( 'cmm_preview', rawurlencode( $token ), home_url( '/' ) ) : '';
+		printf(
+			'<input type="text" name="cmm_preview_token" id="cmm_preview_token" value="%s" class="regular-text" placeholder="%s">
+			<button type="button" class="button" id="cmm_generate_token">%s</button>
+			<p class="description">%s</p>',
+			esc_attr( $token ),
+			esc_attr__( 'e.g. a random string', 'bonsai-maintenance' ),
+			esc_html__( 'Generate', 'bonsai-maintenance' ),
+			esc_html__( 'Set a token, then save changes, to get a shareable preview link that bypasses maintenance mode for anyone who has it.', 'bonsai-maintenance' )
+		);
+		if ( $token ) {
+			printf(
+				'<p class="description"><strong>%s</strong> <input type="text" readonly value="%s" class="regular-text" onclick="this.select();"></p>',
+				esc_html__( 'Preview link:', 'bonsai-maintenance' ),
+				esc_url( $link )
+			);
+		}
+		?>
+		<script>
+		( function () {
+			var btn = document.getElementById( 'cmm_generate_token' );
+			if ( ! btn ) { return; }
+			btn.addEventListener( 'click', function () {
+				var chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+				var token = '';
+				for ( var i = 0; i < 24; i++ ) {
+					token += chars.charAt( Math.floor( Math.random() * chars.length ) );
+				}
+				document.getElementById( 'cmm_preview_token' ).value = token;
+			} );
+		} )();
+		</script>
+		<?php
+	}, 'cmm-settings', 'cmm_section_access' );
+
+	add_settings_field( 'cmm_ip_allowlist', __( 'IP Allowlist', 'bonsai-maintenance' ), function () {
+		printf(
+			'<textarea name="cmm_ip_allowlist" class="large-text" rows="3" placeholder="%s">%s</textarea><p class="description">%s</p>',
+			esc_attr__( '203.0.113.10, 203.0.113.11', 'bonsai-maintenance' ),
+			esc_textarea( get_option( 'cmm_ip_allowlist', '' ) ),
+			esc_html__( 'Comma or newline separated IP addresses that always bypass maintenance mode.', 'bonsai-maintenance' )
+		);
+	}, 'cmm-settings', 'cmm_section_access' );
+
+	/*
 	 * Fields — Design
 	 * -------------------------------------------------------------------------
 	 */
-	add_settings_field( 'cmm_logo', __( 'Header Logo (URL)', 'bonsai-maintenance' ), function () {
-		printf(
-			'<input type="url" name="cmm_logo" value="%s" class="regular-text">',
-			esc_attr( get_option( 'cmm_logo', '' ) )
-		);
+	add_settings_field( 'cmm_logo', __( 'Header Logo', 'bonsai-maintenance' ), function () {
+		cmm_render_media_field( 'cmm_logo', get_option( 'cmm_logo', '' ) );
 	}, 'cmm-settings', 'cmm_section_design' );
 
-	add_settings_field( 'cmm_background_image', __( 'Background Image (URL)', 'bonsai-maintenance' ), function () {
-		printf(
-			'<input type="url" name="cmm_background_image" value="%s" class="regular-text" placeholder="%s"><p class="description">%s</p>',
-			esc_attr( get_option( 'cmm_background_image', '' ) ),
-			esc_attr__( 'https://example.com/background.jpg', 'bonsai-maintenance' ),
-			esc_html__( 'Full-page background image. Overrides the background colour below.', 'bonsai-maintenance' )
-		);
+	add_settings_field( 'cmm_background_image', __( 'Background Image', 'bonsai-maintenance' ), function () {
+		cmm_render_media_field( 'cmm_background_image', get_option( 'cmm_background_image', '' ) );
+		printf( '<p class="description">%s</p>', esc_html__( 'Full-page background image. Overrides the background colour below.', 'bonsai-maintenance' ) );
 	}, 'cmm-settings', 'cmm_section_design' );
 
 	add_settings_field( 'cmm_bg_colour', __( 'Background Colour', 'bonsai-maintenance' ), function () {
@@ -654,4 +946,35 @@ function cmm_sanitize_meta_desc( $value ) {
 	}
 
 	return $value;
+}
+
+/**
+ * Sanitises a `datetime-local` input value, discarding anything that
+ * doesn't parse to a valid timestamp.
+ *
+ * @param mixed $value Raw input.
+ * @return string Sanitised datetime string, or empty string if invalid.
+ */
+function cmm_sanitize_datetime( $value ) {
+	$value = is_string( $value ) ? trim( $value ) : '';
+	if ( '' === $value ) {
+		return '';
+	}
+	return strtotime( $value ) ? sanitize_text_field( $value ) : '';
+}
+
+/**
+ * Sanitises a comma/newline separated list of IP addresses, discarding
+ * anything that doesn't validate as a well-formed IP.
+ *
+ * @param mixed $value Raw input.
+ * @return string Comma-separated list of valid IPs.
+ */
+function cmm_sanitize_ip_list( $value ) {
+	$value = is_string( $value ) ? $value : '';
+	$parts = preg_split( '/[\s,]+/', $value, -1, PREG_SPLIT_NO_EMPTY );
+	$valid = array_filter( $parts, function ( $ip ) {
+		return false !== filter_var( $ip, FILTER_VALIDATE_IP );
+	} );
+	return implode( ', ', $valid );
 }
