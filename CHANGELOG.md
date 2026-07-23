@@ -21,6 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.16] - 2026-07-23
+
+### Fixed
+- [bonsai-maintenance.php] Fixed fatal error on plugin load caused by calling `setUpdateCheckInterval()`, a method not present on `Vcs\PluginUpdateChecker` in the resolved PUC v5.6 build — interval is now set via the `buildUpdateChecker()` constructor argument instead, matching the pattern used in `bonsai-code-injector`
+
+---
+
 ## [1.15] - 2026-03-30
 
 ### Added
