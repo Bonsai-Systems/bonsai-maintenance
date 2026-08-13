@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 -
 
 ### Fixed
--
+- [composer.json] `composer.json` was byte-identical to several other Bonsai plugins' (all requiring `yahnis-elsts/plugin-update-checker`), which risked Composer generating the same `ComposerAutoloaderInit{hash}` autoloader class across plugins — a fatal "class already in use" error if two such plugins were ever active together on the same site (confirmed happening on a live client site between `cookie-consent-video-embed-CookieScript` and this plugin). Added a unique `name` field to `composer.json` and regenerated `vendor/` from a clean install; also picked up `yahnis-elsts/plugin-update-checker` v5.6 → v5.7 in the process.
 
 ### Removed
 -
