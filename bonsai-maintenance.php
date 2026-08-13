@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Bonsai Digital Maintenance Mode
  * Description: Displays a customisable maintenance page for non-logged-in users, and can replace the standard WordPress maintenance screen.
- * Version: 1.17
+ * Version: 1.18
  * Author: Ben Ervine / The Bonsai Digital Collective
  * Author URI: https://thebonsaidigitalcollective.co.uk
  * Text Domain: bonsai-maintenance
@@ -22,7 +22,7 @@ require_once plugin_dir_path( __FILE__ ) . 'vendor/autoload.php';
 use YahnisElsts\PluginUpdateChecker\v5\PucFactory;
 
 $cmm_update_checker = PucFactory::buildUpdateChecker(
-	'https://github.com/gakdesign/bonsai-maintenance',
+	'https://github.com/Bonsai-Systems/bonsai-maintenance',
 	__FILE__,
 	'bonsai-maintenance',
 	6

@@ -5,7 +5,7 @@ Tags: maintenance, coming soon, offline, 503, custom page
 Requires at least: 5.8
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.17
+Stable tag: 1.18
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -119,6 +119,10 @@ Bonsai Digital Maintenance Mode shows a friendly, customisable maintenance page 
 * **Headers already sent?** Another plugin/theme may print too early; this plugin runs on `template_redirect`.
 
 == Changelog ==
+
+= 1.18 =
+* Fix: `composer.json` given a unique package name to prevent a fatal autoloader class collision when installed alongside other Bonsai plugins sharing the same update-checker dependency; `yahnis-elsts/plugin-update-checker` bumped v5.6 → v5.7.
+* Fix: Update checker's GitHub source corrected to point at the `Bonsai-Systems` org, matching where releases are actually published.
 
 = 1.17 =
 * Add preview bypass link (`cmm_preview_token`) — share a `?cmm_preview=TOKEN` URL with clients to view the live site during maintenance, no wp-admin access needed.
