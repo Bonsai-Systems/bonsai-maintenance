@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Bonsai Digital Maintenance Mode
  * Description: Displays a customisable maintenance page for non-logged-in users, and can replace the standard WordPress maintenance screen.
- * Version: 1.18
+ * Version: 1.19
  * Author: Ben Ervine / The Bonsai Digital Collective
  * Author URI: https://thebonsaidigitalcollective.co.uk
  * Text Domain: bonsai-maintenance
@@ -847,9 +847,20 @@ function cmm_generate_static_maintenance_page() {
 }
 
 /**
- * De-bounced regeneration — runs once at the end of each admin request.
+ * De-bounced regeneration — only queued when a cmm_* option is actually saved,
+ * then runs once at the end of that request. Previously ran on every shutdown
+ * (including front-end page loads), firing a 13-call get_option() burst on
+ * every single request for no reason.
  */
-add_action( 'shutdown', 'cmm_generate_static_maintenance_page_once' );
+add_action( 'updated_option', 'cmm_maybe_queue_regeneration' );
+add_action( 'added_option', 'cmm_maybe_queue_regeneration' );
+
+function cmm_maybe_queue_regeneration( $option ) {
+	if ( 0 !== strpos( $option, 'cmm_' ) ) {
+		return;
+	}
+	add_action( 'shutdown', 'cmm_generate_static_maintenance_page_once' );
+}
 
 function cmm_generate_static_maintenance_page_once() {
 	static $done = false;

@@ -21,6 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.19] - 2026-08-17
+
+### Fixed
+- [bonsai-maintenance.php] Static maintenance page regeneration (a 13-call `get_option()` burst plus a file write) was running on the `shutdown` hook of every front-end request instead of only after a settings change, contrary to its own "de-bounced" comment. Now gated behind `updated_option`/`added_option` for `cmm_*` keys, so the page only regenerates when a setting is actually saved.
+
+---
+
 ## [1.18] - 2026-08-13
 
 ### Fixed
