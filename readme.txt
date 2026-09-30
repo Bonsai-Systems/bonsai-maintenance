@@ -25,6 +25,7 @@ Bonsai Digital Maintenance Mode shows a friendly, customisable maintenance page 
 * **Scheduled start/end datetime** — auto turns maintenance mode on/off without you remembering to flip the switch.
 * **Preview bypass link** — a secret `?cmm_preview=TOKEN` URL to share with clients so they can view the live site without wp-admin access.
 * **IP allowlist** — always let specific IPs through, no login required.
+* **Site password** — visitors click "Have a password?" on the maintenance page and enter a shared password to access the site.
 * **Basic SEO**: custom page title + meta description (still `noindex, nofollow`).
 * Optional override of WordPress' core `wp-content/maintenance.php`.
 * Writes static snapshot to `wp-content/maintenance-template.html`.
@@ -64,6 +65,8 @@ Bonsai Digital Maintenance Mode shows a friendly, customisable maintenance page 
 = Preview & Access =
 * **Preview Token** (`cmm_preview_token`) — Set a token, save, and share the generated `?cmm_preview=TOKEN` link with clients to bypass maintenance mode without wp-admin access
 * **IP Allowlist** (`cmm_ip_allowlist`) — Comma/newline separated IPs that always bypass maintenance mode
+* **Site Password** (`cmm_site_password`) — Shared password visitors can enter on the maintenance page to access the site. Stored hashed; leave blank to keep the current one
+* **Remember Password For** (`cmm_password_days`) — Days access lasts after entering the password (default 7; 0 = browser session, max 24 hours)
 
 = Design =
 * **Header Logo** (`cmm_logo`) — Optional logo, chosen via the media library

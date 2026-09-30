@@ -85,12 +85,23 @@ function cmm_enable_maintenance_mode() {
 	if ( cmm_check_ip_allowlist() ) {
 		return;
 	}
+	if ( cmm_has_password_access() ) {
+		return;
+	}
+
+	// Redirects and exits on a correct password; otherwise returns an error message (or '').
+	$password_error = cmm_handle_password_submission();
 
 	status_header( 503 );
 	header( 'Content-Type: text/html; charset=utf-8' );
 	header( 'Retry-After: ' . cmm_get_retry_after() );
 	// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- fully escaped inside render function
-	echo cmm_render_maintenance_page();
+	echo cmm_render_maintenance_page(
+		[
+			'password_form'  => true,
+			'password_error' => $password_error,
+		]
+	);
 	exit;
 }
 
@@ -218,6 +229,155 @@ function cmm_check_preview_bypass() {
 
 /*
 |--------------------------------------------------------------------------
+| Password access
+|--------------------------------------------------------------------------
+*/
+
+define( 'CMM_PASSWORD_COOKIE', 'cmm_password_access' );
+define( 'CMM_PASSWORD_MAX_ATTEMPTS', 5 );
+define( 'CMM_PASSWORD_LOCKOUT', 15 * MINUTE_IN_SECONDS );
+
+/**
+ * Builds the HMAC signature for a password access cookie. The stored password
+ * hash is part of the signed data, so changing or removing the password
+ * invalidates every cookie previously issued.
+ *
+ * @param int    $expiry Unix timestamp the cookie is valid until.
+ * @param string $hash   Stored password hash.
+ * @return string Hex HMAC signature.
+ */
+function cmm_password_cookie_signature( $expiry, $hash ) {
+	return hash_hmac( 'sha256', $expiry . '|' . $hash, wp_salt( 'auth' ) );
+}
+
+/**
+ * Checks whether the visitor holds a valid, unexpired password access cookie.
+ *
+ * @return bool True if the visitor has already entered the correct password.
+ */
+function cmm_has_password_access() {
+	$hash = get_option( 'cmm_site_password', '' );
+	if ( '' === $hash || empty( $_COOKIE[ CMM_PASSWORD_COOKIE ] ) ) {
+		return false;
+	}
+
+	$raw   = sanitize_text_field( wp_unslash( $_COOKIE[ CMM_PASSWORD_COOKIE ] ) );
+	$parts = explode( '|', $raw );
+	if ( 2 !== count( $parts ) || ! ctype_digit( $parts[0] ) ) {
+		return false;
+	}
+
+	$expiry = (int) $parts[0];
+	if ( $expiry < time() ) {
+		return false;
+	}
+
+	return hash_equals( cmm_password_cookie_signature( $expiry, $hash ), $parts[1] );
+}
+
+/**
+ * Issues the password access cookie. A "remember" setting of 0 days gives a
+ * browser-session cookie, still capped server-side at 24 hours.
+ *
+ * @param string $hash Stored password hash.
+ */
+function cmm_set_password_cookie( $hash ) {
+	if ( headers_sent() ) {
+		return;
+	}
+
+	$days   = (int) get_option( 'cmm_password_days', 7 );
+	$expiry = time() + ( $days > 0 ? $days * DAY_IN_SECONDS : DAY_IN_SECONDS );
+
+	setcookie(
+		CMM_PASSWORD_COOKIE,
+		$expiry . '|' . cmm_password_cookie_signature( $expiry, $hash ),
+		[
+			'expires'  => $days > 0 ? $expiry : 0,
+			'path'     => COOKIEPATH ? COOKIEPATH : '/',
+			'domain'   => (string) COOKIE_DOMAIN,
+			'secure'   => is_ssl(),
+			'httponly' => true,
+			'samesite' => 'Lax',
+		]
+	);
+}
+
+/**
+ * Processes a password form submission from the maintenance page. On success
+ * it sets the access cookie and redirects back to the requested URL (so a
+ * refresh doesn't resubmit the form). Failed attempts are throttled per IP.
+ *
+ * @return string Error message to show on the form, or '' if nothing was submitted.
+ */
+function cmm_handle_password_submission() {
+	if ( ! isset( $_SERVER['REQUEST_METHOD'] ) || 'POST' !== $_SERVER['REQUEST_METHOD'] || ! isset( $_POST['cmm_access_password'] ) ) {
+		return '';
+	}
+
+	$hash = get_option( 'cmm_site_password', '' );
+	if ( '' === $hash ) {
+		return '';
+	}
+
+	if ( ! isset( $_POST['cmm_access_nonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['cmm_access_nonce'] ) ), 'cmm_access_password' ) ) {
+		return __( 'Your session expired. Please try again.', 'bonsai-maintenance' );
+	}
+
+	$lock_key = 'cmm_pw_fail_' . md5( cmm_visitor_ip() );
+	$failures = (int) get_transient( $lock_key );
+	if ( $failures >= CMM_PASSWORD_MAX_ATTEMPTS ) {
+		return __( 'Too many attempts. Please try again in 15 minutes.', 'bonsai-maintenance' );
+	}
+
+	// Not sanitised: any character is valid in a password and it is only ever compared against the hash.
+	// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
+	$supplied = wp_unslash( $_POST['cmm_access_password'] );
+
+	if ( is_string( $supplied ) && '' !== $supplied && wp_check_password( $supplied, $hash ) ) {
+		delete_transient( $lock_key );
+		cmm_set_password_cookie( $hash );
+
+		$redirect = isset( $_SERVER['REQUEST_URI'] ) ? esc_url_raw( wp_unslash( $_SERVER['REQUEST_URI'] ) ) : '/';
+		wp_safe_redirect( $redirect, 303 );
+		exit;
+	}
+
+	set_transient( $lock_key, $failures + 1, CMM_PASSWORD_LOCKOUT );
+
+	return __( 'Incorrect password. Please try again.', 'bonsai-maintenance' );
+}
+
+/**
+ * Returns the "Have a password?" disclosure and form shown on the maintenance
+ * page. Uses a native <details> element so no JavaScript is needed.
+ *
+ * @param string $error Error message from a failed attempt, or ''.
+ * @return string Escaped HTML.
+ */
+function cmm_render_password_form( $error ) {
+	ob_start();
+	?>
+	<details class="cmm-access"<?php echo $error ? ' open' : ''; ?>>
+		<summary><?php esc_html_e( 'Have a password?', 'bonsai-maintenance' ); ?></summary>
+		<form method="post" action="" class="cmm-access__form">
+			<label for="cmm_access_password"><?php esc_html_e( 'Site password', 'bonsai-maintenance' ); ?></label>
+			<div class="cmm-access__row">
+				<input type="password" name="cmm_access_password" id="cmm_access_password" autocomplete="current-password" required<?php echo $error ? ' aria-invalid="true" aria-describedby="cmm_access_error" autofocus' : ''; ?>>
+				<button type="submit"><?php esc_html_e( 'Enter site', 'bonsai-maintenance' ); ?></button>
+			</div>
+			<?php if ( $error ) : ?>
+			<p class="cmm-access__error" id="cmm_access_error" role="alert"><?php echo esc_html( $error ); ?></p>
+			<?php endif; ?>
+			<?php wp_nonce_field( 'cmm_access_password', 'cmm_access_nonce', false ); ?>
+		</form>
+	</details>
+	<?php
+	return ob_get_clean();
+}
+
+/*
+|--------------------------------------------------------------------------
 | Maintenance page template
 |--------------------------------------------------------------------------
 */
@@ -225,9 +385,28 @@ function cmm_check_preview_bypass() {
 /**
  * Renders and returns the full HTML maintenance page.
  *
+ * @param array $args {
+ *     Optional. Render options.
+ *
+ *     @type bool   $password_form  Whether to include the password form (if a password is set).
+ *                                  False for the static snapshot, which can't process a POST.
+ *     @type string $password_error Error message from a failed password attempt.
+ * }
  * @return string Complete HTML document.
  */
-function cmm_render_maintenance_page() {
+function cmm_render_maintenance_page( $args = [] ) {
+	$args = wp_parse_args(
+		$args,
+		[
+			'password_form'  => false,
+			'password_error' => '',
+		]
+	);
+
+	$password_html = ( $args['password_form'] && '' !== get_option( 'cmm_site_password', '' ) )
+		? cmm_render_password_form( $args['password_error'] )
+		: '';
+
 	$site_name    = get_bloginfo( 'name' );
 	$logo         = get_option( 'cmm_logo', '' );
 	$bg_image     = get_option( 'cmm_background_image', '' );
@@ -327,6 +506,31 @@ function cmm_render_maintenance_page() {
 			margin-bottom: 16px;
 		}
 		.cmm-empty { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+		.cmm-access { margin-top: 24px; font-size: 14px; }
+		.cmm-access summary { cursor: pointer; text-decoration: underline; display: inline-block; }
+		.cmm-access summary:focus-visible,
+		.cmm-access input:focus-visible,
+		.cmm-access button:focus-visible { outline: 2px solid var(--cmm-color); outline-offset: 2px; }
+		.cmm-access__form { margin-top: 12px; }
+		.cmm-access__form label { display: block; margin-bottom: 6px; font-weight: 600; }
+		.cmm-access__row { display: flex; flex-wrap: wrap; gap: 8px; }
+		.cmm-access__row input { flex: 1 1 180px; padding: 8px 10px; font-size: 16px; border: 1px solid #767676; border-radius: 6px; }
+		.cmm-access__row button { padding: 8px 16px; font-size: 16px; border: 1px solid var(--cmm-color); border-radius: 6px; background: transparent; color: var(--cmm-color); cursor: pointer; }
+		.cmm-access__error { margin: 8px 0 0; color: #b00020; }
+		.cmm-access-card {
+			position: fixed;
+			left: 50%;
+			bottom: 24px;
+			transform: translateX(-50%);
+			width: calc(100% - 32px);
+			max-width: 400px;
+			text-align: left;
+			background: rgba(255, 255, 255, .9);
+			border-radius: 12px;
+			padding: 4px 20px 20px;
+			box-shadow: 0 6px 24px rgba(0, 0, 0, .08);
+			color: var(--cmm-color);
+		}
 	</style>
 </head>
 <body>
@@ -387,6 +591,11 @@ function cmm_render_maintenance_page() {
 		</div>
 		<?php endif; ?>
 
+		<?php
+		// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped inside cmm_render_password_form()
+		echo $password_html;
+		?>
+
 		<footer>
 			<p>
 				&copy; <?php echo esc_html( date_i18n( 'Y' ) ); ?>
@@ -399,6 +608,14 @@ function cmm_render_maintenance_page() {
 	</article>
 	<?php else : ?>
 	<div class="cmm-empty" aria-hidden="true"></div>
+		<?php if ( $password_html ) : ?>
+	<div class="cmm-access-card">
+			<?php
+			// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped inside cmm_render_password_form()
+			echo $password_html;
+			?>
+	</div>
+		<?php endif; ?>
 	<?php endif; ?>
 
 </body>
@@ -541,6 +758,8 @@ add_action( 'admin_init', function () {
 	// Access.
 	register_setting( 'cmm_settings', 'cmm_preview_token', [ 'type' => 'string', 'sanitize_callback' => 'cmm_sanitize_line',     'default' => '' ] );
 	register_setting( 'cmm_settings', 'cmm_ip_allowlist',  [ 'type' => 'string', 'sanitize_callback' => 'cmm_sanitize_ip_list',  'default' => '' ] );
+	register_setting( 'cmm_settings', 'cmm_site_password', [ 'type' => 'string',  'sanitize_callback' => 'cmm_sanitize_site_password', 'default' => '' ] );
+	register_setting( 'cmm_settings', 'cmm_password_days', [ 'type' => 'integer', 'sanitize_callback' => 'cmm_sanitize_password_days', 'default' => 7 ] );
 
 	// Design.
 	register_setting( 'cmm_settings', 'cmm_logo',             [ 'type' => 'string', 'sanitize_callback' => 'esc_url_raw',        'default' => '' ] );
@@ -682,6 +901,31 @@ add_action( 'admin_init', function () {
 			esc_attr__( '203.0.113.10, 203.0.113.11', 'bonsai-maintenance' ),
 			esc_textarea( get_option( 'cmm_ip_allowlist', '' ) ),
 			esc_html__( 'Comma or newline separated IP addresses that always bypass maintenance mode.', 'bonsai-maintenance' )
+		);
+	}, 'cmm-settings', 'cmm_section_access' );
+
+	add_settings_field( 'cmm_site_password', __( 'Site Password', 'bonsai-maintenance' ), function () {
+		$is_set = '' !== get_option( 'cmm_site_password', '' );
+		printf(
+			'<input type="password" name="cmm_site_password" id="cmm_site_password" value="" class="regular-text" autocomplete="new-password" placeholder="%s"><p class="description">%s</p>',
+			esc_attr( $is_set ? __( 'Leave blank to keep the current password', 'bonsai-maintenance' ) : '' ),
+			esc_html__( 'Visitors can click "Have a password?" on the maintenance page and enter this to access the site. Stored hashed, so it can\'t be shown again after saving. Changing it signs out everyone who used the old one.', 'bonsai-maintenance' )
+		);
+		if ( $is_set ) {
+			printf(
+				'<p><strong>%s</strong></p><label><input type="checkbox" name="cmm_site_password_clear" value="1"> %s</label>',
+				esc_html__( 'A password is currently set.', 'bonsai-maintenance' ),
+				esc_html__( 'Remove password', 'bonsai-maintenance' )
+			);
+		}
+	}, 'cmm-settings', 'cmm_section_access' );
+
+	add_settings_field( 'cmm_password_days', __( 'Remember Password For', 'bonsai-maintenance' ), function () {
+		printf(
+			'<input type="number" name="cmm_password_days" id="cmm_password_days" value="%s" min="0" max="365" step="1" class="small-text"> %s<p class="description">%s</p>',
+			esc_attr( (int) get_option( 'cmm_password_days', 7 ) ),
+			esc_html__( 'days', 'bonsai-maintenance' ),
+			esc_html__( 'How long access lasts after entering the password. Use 0 to end access when the browser closes (maximum 24 hours).', 'bonsai-maintenance' )
 		);
 	}, 'cmm-settings', 'cmm_section_access' );
 
@@ -988,4 +1232,45 @@ function cmm_sanitize_ip_list( $value ) {
 		return false !== filter_var( $ip, FILTER_VALIDATE_IP );
 	} );
 	return implode( ', ', $valid );
+}
+
+/**
+ * Hashes a newly entered site password. A blank submission keeps the existing
+ * hash, and the "Remove password" checkbox clears it.
+ *
+ * The result is cached per request because WordPress runs the sanitise
+ * callback twice when an option is first created (update_option → add_option),
+ * which would otherwise hash the hash.
+ *
+ * @param mixed $value Raw input (already unslashed by options.php).
+ * @return string Password hash, or an empty string if no password is set.
+ */
+function cmm_sanitize_site_password( $value ) {
+	static $result = null;
+	if ( null !== $result ) {
+		return $result;
+	}
+
+	// Nonce already verified by options.php before sanitise callbacks run.
+	// phpcs:ignore WordPress.Security.NonceVerification.Missing
+	if ( ! empty( $_POST['cmm_site_password_clear'] ) ) {
+		$result = '';
+	} elseif ( is_string( $value ) && '' !== $value ) {
+		// Not sanitised: any character is valid in a password, and only the hash is stored.
+		$result = wp_hash_password( $value );
+	} else {
+		$result = (string) get_option( 'cmm_site_password', '' );
+	}
+
+	return $result;
+}
+
+/**
+ * Sanitises the "remember password" duration to a whole number of days (0–365).
+ *
+ * @param mixed $value Raw input.
+ * @return int Number of days.
+ */
+function cmm_sanitize_password_days( $value ) {
+	return min( 365, absint( $value ) );
 }

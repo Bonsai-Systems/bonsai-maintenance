@@ -19,6 +19,7 @@ A lightweight WordPress plugin that displays a customisable maintenance page to 
 - **Scheduled start/end datetime** — auto-enable/disable without a manual toggle
 - **Preview bypass link** — shareable `?cmm_preview=TOKEN` URL for client previews without wp-admin access
 - **IP allowlist** — always let specific IPs through
+- **Site password** — visitors enter a shared password via a "Have a password?" link to access the site (hashed, throttled, configurable remember duration)
 - **Basic SEO**: custom page title + meta description (still `noindex, nofollow`)
 - Optional override of WordPress' maintenance screen
 - Writes **static HTML snapshot** to `wp-content/maintenance-template.html`
@@ -84,6 +85,8 @@ Navigate to **Settings → Maintenance Mode** to configure.
 |--------|-----|-------------|
 | Preview Token | `cmm_preview_token` | Set + save to generate a `?cmm_preview=TOKEN` link that bypasses maintenance mode for anyone who has it |
 | IP Allowlist | `cmm_ip_allowlist` | Comma/newline separated IPs that always bypass maintenance mode |
+| Site Password | `cmm_site_password` | Shared password entered on the maintenance page to access the site. Stored hashed; leave blank to keep, tick "Remove password" to clear |
+| Remember Password For | `cmm_password_days` | Days access lasts after entering the password (default 7; 0 = browser session, max 24h) |
 
 ### Design
 | Option | Key | Description |

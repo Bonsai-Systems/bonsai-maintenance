@@ -8,10 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
--
+- [bonsai-maintenance.php] Site password (`cmm_site_password`) — visitors can click "Have a password?" on the maintenance page and enter a shared password to access the site. Stored hashed via `wp_hash_password()`; access is granted by an HttpOnly, HMAC-signed cookie tied to the current hash, so changing or removing the password revokes all existing access. Form is nonce-protected and throttled to 5 failed attempts per IP per 15 minutes.
+- [bonsai-maintenance.php] "Remember Password For" setting (`cmm_password_days`, default 7, 0 = browser session capped at 24 hours).
 
 ### Changed
--
+- [bonsai-maintenance.php] `cmm_render_maintenance_page()` now accepts an `$args` array; the password form is only rendered on live requests, never in the static `maintenance-template.html` snapshot.
 
 ### Fixed
 -
