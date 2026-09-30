@@ -1,0 +1,25 @@
+/**
+ * Settings → Maintenance Mode. Layered on bonsai-admin-ui.css, which supplies
+ * the header, cards, form controls, buttons and badges. Enqueued on that
+ * screen only.
+ */
+
+.cmm-media-preview {
+	display: block;
+	max-width: 150px;
+	height: auto;
+	margin-top: 8px;
+	border: 1px solid #dcdcde;
+	border-radius: 6px;
+}
+
+/* wp-admin's .button display rule beats the UA [hidden] rule. */
+.bonsai-ui [hidden] {
+	display: none !important;
+}
+
+.bonsai-ui input[type="color"] {
+	width: 64px;
+	height: 36px;
+	padding: 2px;
+}

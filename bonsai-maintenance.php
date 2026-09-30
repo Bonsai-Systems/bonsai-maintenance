@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Bonsai Digital Maintenance Mode
  * Description: Displays a customisable maintenance page for non-logged-in users, and can replace the standard WordPress maintenance screen.
- * Version: 1.19
+ * Version: 1.20
  * Author: Ben Ervine / The Bonsai Digital Collective
  * Author URI: https://thebonsaidigitalcollective.co.uk
  * Text Domain: bonsai-maintenance
@@ -11,6 +11,12 @@
  */
 
 defined( 'ABSPATH' ) || exit;
+
+// Keep in step with the Version header above.
+define( 'CMM_VERSION', '1.20' );
+define( 'CMM_URL', plugin_dir_url( __FILE__ ) );
+
+require_once plugin_dir_path( __FILE__ ) . 'includes/admin-ui.php';
 
 /*
 |--------------------------------------------------------------------------
@@ -430,7 +436,7 @@ function cmm_render_maintenance_page( $args = [] ) {
 
 	$page_title = '' !== trim( $seo_title )
 		? $seo_title
-		: $site_name . ' \u2013 ' . __( 'Scheduled Maintenance', 'bonsai-maintenance' );
+		: $site_name . ' – ' . __( 'Scheduled Maintenance', 'bonsai-maintenance' );
 
 	if ( '' === trim( $badge_text ) ) {
 		$badge_text = __( 'Scheduled maintenance', 'bonsai-maintenance' );
@@ -640,7 +646,8 @@ add_action( 'admin_menu', function () {
 } );
 
 /**
- * Loads the WP media library JS only on our settings screen.
+ * Loads the Bonsai admin styles, the media library and the settings-screen
+ * JS (media pickers, preview-token generator) on our settings screen only.
  *
  * @param string $hook_suffix Current admin page hook suffix.
  */
@@ -649,52 +656,18 @@ add_action( 'admin_enqueue_scripts', function ( $hook_suffix ) {
 		return;
 	}
 	wp_enqueue_media();
-	wp_add_inline_script( 'media-editor', cmm_media_picker_js() );
+	cmm_enqueue_admin_ui();
+	wp_enqueue_style( 'cmm-admin', CMM_URL . 'assets/css/admin.css', [ 'cmm-bonsai-admin-ui' ], CMM_VERSION );
+	wp_enqueue_script( 'cmm-admin', CMM_URL . 'assets/js/admin.js', [ 'jquery' ], CMM_VERSION, true );
+	wp_localize_script(
+		'cmm-admin',
+		'cmmAdmin',
+		[
+			'mediaTitle'  => __( 'Select image', 'bonsai-maintenance' ),
+			'mediaButton' => __( 'Use this image', 'bonsai-maintenance' ),
+		]
+	);
 } );
-
-/**
- * Returns the inline JS that powers the "Choose Image" / "Remove" buttons
- * for the logo and background image fields.
- *
- * @return string JS source.
- */
-function cmm_media_picker_js() {
-	return <<<'JS'
-( function ( $ ) {
-	$( document ).on( 'click', '.cmm-media-select', function ( e ) {
-		e.preventDefault();
-		var button    = $( this );
-		var fieldName = button.data( 'field' );
-		var input     = $( '#' + fieldName );
-		var preview   = $( '#' + fieldName + '_preview' );
-		var removeBtn = $( '#' + fieldName + '_remove' );
-
-		var frame = wp.media( {
-			title: 'Select Image',
-			button: { text: 'Use this image' },
-			multiple: false
-		} );
-
-		frame.on( 'select', function () {
-			var attachment = frame.state().get( 'selection' ).first().toJSON();
-			input.val( attachment.url );
-			preview.attr( 'src', attachment.url ).show();
-			removeBtn.show();
-		} );
-
-		frame.open();
-	} );
-
-	$( document ).on( 'click', '.cmm-media-remove', function ( e ) {
-		e.preventDefault();
-		var fieldName = $( this ).data( 'field' );
-		$( '#' + fieldName ).val( '' );
-		$( '#' + fieldName + '_preview' ).hide().attr( 'src', '' );
-		$( this ).hide();
-	} );
-} )( jQuery );
-JS;
-}
 
 /**
  * Renders a URL text field paired with a media-library picker button,
@@ -705,18 +678,18 @@ JS;
  */
 function cmm_render_media_field( $field_name, $value ) {
 	printf(
-		'<input type="url" name="%1$s" id="%1$s" value="%2$s" class="regular-text" placeholder="%3$s">
-		<button type="button" class="button cmm-media-select" data-field="%1$s">%4$s</button>
-		<button type="button" class="button cmm-media-remove" data-field="%1$s" id="%1$s_remove" style="%5$s">%6$s</button>
-		<br>
-		<img id="%1$s_preview" src="%2$s" style="max-width:150px;height:auto;margin-top:8px;%7$s">',
+		'<div class="bonsai-ui-actions">
+			<input type="url" name="%1$s" id="%1$s" value="%2$s" class="regular-text" placeholder="%3$s">
+			<button type="button" class="button cmm-media-select" data-field="%1$s">%4$s</button>
+			<button type="button" class="button cmm-media-remove" data-field="%1$s" id="%1$s_remove"%5$s>%6$s</button>
+		</div>
+		<img id="%1$s_preview" class="cmm-media-preview" src="%2$s" alt=""%5$s>',
 		esc_attr( $field_name ),
 		esc_attr( $value ),
 		esc_attr__( 'https://example.com/image.jpg', 'bonsai-maintenance' ),
 		esc_html__( 'Choose Image', 'bonsai-maintenance' ),
-		$value ? '' : 'display:none;',
-		esc_html__( 'Remove', 'bonsai-maintenance' ),
-		$value ? '' : 'display:none;'
+		$value ? '' : ' hidden',
+		esc_html__( 'Remove', 'bonsai-maintenance' )
 	);
 }
 
@@ -724,15 +697,54 @@ function cmm_render_media_field( $field_name, $value ) {
  * Renders the settings page wrapper.
  */
 function cmm_settings_page() {
+	if ( ! current_user_can( 'manage_options' ) ) {
+		return;
+	}
+
+	global $wp_settings_sections;
+
+	$sections = isset( $wp_settings_sections['cmm-settings'] ) ? (array) $wp_settings_sections['cmm-settings'] : [];
+	$active   = cmm_is_maintenance_active();
 	?>
-	<div class="wrap">
-		<h1><?php echo esc_html__( 'Maintenance Mode Settings', 'bonsai-maintenance' ); ?></h1>
+	<div class="wrap bonsai-ui bonsai-ui--narrow">
+		<?php
+		cmm_render_admin_header(
+			__( 'Maintenance Mode Settings', 'bonsai-maintenance' ),
+			__( 'Shows a customisable maintenance page to logged-out visitors, with scheduling, preview links, an IP allowlist and an optional site password.', 'bonsai-maintenance' ),
+			[
+				[
+					'label'    => __( 'View site', 'bonsai-maintenance' ),
+					'url'      => home_url( '/' ),
+					'external' => true,
+				],
+			]
+		);
+		?>
 		<form method="post" action="options.php">
+			<?php settings_fields( 'cmm_settings' ); ?>
+
 			<?php
-			settings_fields( 'cmm_settings' );
-			do_settings_sections( 'cmm-settings' );
-			submit_button();
-			?>
+			// Same output as do_settings_sections(), but one card per section.
+			foreach ( $sections as $section ) :
+				?>
+				<section class="bonsai-ui-card" aria-labelledby="<?php echo esc_attr( $section['id'] ); ?>-title">
+					<div class="bonsai-ui-card__head">
+						<h2 class="bonsai-ui-card__title" id="<?php echo esc_attr( $section['id'] ); ?>-title"><?php echo esc_html( $section['title'] ); ?></h2>
+						<?php if ( 'cmm_section_status' === $section['id'] ) : ?>
+							<?php if ( $active ) : ?>
+								<span class="bonsai-ui-badge bonsai-ui-badge--warning"><?php esc_html_e( 'Maintenance mode is on', 'bonsai-maintenance' ); ?></span>
+							<?php else : ?>
+								<span class="bonsai-ui-badge bonsai-ui-badge--success"><?php esc_html_e( 'Site is live', 'bonsai-maintenance' ); ?></span>
+							<?php endif; ?>
+						<?php endif; ?>
+					</div>
+					<table class="form-table" role="presentation">
+						<?php do_settings_fields( 'cmm-settings', $section['id'] ); ?>
+					</table>
+				</section>
+			<?php endforeach; ?>
+
+			<?php submit_button(); ?>
 		</form>
 	</div>
 	<?php
@@ -840,19 +852,19 @@ add_action( 'admin_init', function () {
 
 	add_settings_field( 'cmm_schedule_start', __( 'Start', 'bonsai-maintenance' ), function () {
 		printf(
-			'<input type="datetime-local" name="cmm_schedule_start" value="%s"><p class="description">%s</p>',
+			'<input type="datetime-local" name="cmm_schedule_start" id="cmm_schedule_start" value="%s"><p class="description">%s</p>',
 			esc_attr( get_option( 'cmm_schedule_start', '' ) ),
 			esc_html__( 'Leave blank to start immediately once enabled.', 'bonsai-maintenance' )
 		);
-	}, 'cmm-settings', 'cmm_section_schedule' );
+	}, 'cmm-settings', 'cmm_section_schedule', [ 'label_for' => 'cmm_schedule_start' ] );
 
 	add_settings_field( 'cmm_schedule_end', __( 'End', 'bonsai-maintenance' ), function () {
 		printf(
-			'<input type="datetime-local" name="cmm_schedule_end" value="%s"><p class="description">%s</p>',
+			'<input type="datetime-local" name="cmm_schedule_end" id="cmm_schedule_end" value="%s"><p class="description">%s</p>',
 			esc_attr( get_option( 'cmm_schedule_end', '' ) ),
 			esc_html__( 'Leave blank to require manual turn-off. Also used to calculate the Retry-After header.', 'bonsai-maintenance' )
 		);
-	}, 'cmm-settings', 'cmm_section_schedule' );
+	}, 'cmm-settings', 'cmm_section_schedule', [ 'label_for' => 'cmm_schedule_end' ] );
 
 	/*
 	 * Fields — Access
@@ -872,37 +884,21 @@ add_action( 'admin_init', function () {
 		);
 		if ( $token ) {
 			printf(
-				'<p class="description"><strong>%s</strong> <input type="text" readonly value="%s" class="regular-text" onclick="this.select();"></p>',
+				'<p class="description"><label for="cmm_preview_link"><strong>%s</strong></label> <input type="text" id="cmm_preview_link" readonly value="%s" class="regular-text cmm-select-on-focus"></p>',
 				esc_html__( 'Preview link:', 'bonsai-maintenance' ),
 				esc_url( $link )
 			);
 		}
-		?>
-		<script>
-		( function () {
-			var btn = document.getElementById( 'cmm_generate_token' );
-			if ( ! btn ) { return; }
-			btn.addEventListener( 'click', function () {
-				var chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-				var token = '';
-				for ( var i = 0; i < 24; i++ ) {
-					token += chars.charAt( Math.floor( Math.random() * chars.length ) );
-				}
-				document.getElementById( 'cmm_preview_token' ).value = token;
-			} );
-		} )();
-		</script>
-		<?php
-	}, 'cmm-settings', 'cmm_section_access' );
+	}, 'cmm-settings', 'cmm_section_access', [ 'label_for' => 'cmm_preview_token' ] );
 
 	add_settings_field( 'cmm_ip_allowlist', __( 'IP Allowlist', 'bonsai-maintenance' ), function () {
 		printf(
-			'<textarea name="cmm_ip_allowlist" class="large-text" rows="3" placeholder="%s">%s</textarea><p class="description">%s</p>',
+			'<textarea name="cmm_ip_allowlist" id="cmm_ip_allowlist" class="large-text" rows="3" placeholder="%s">%s</textarea><p class="description">%s</p>',
 			esc_attr__( '203.0.113.10, 203.0.113.11', 'bonsai-maintenance' ),
 			esc_textarea( get_option( 'cmm_ip_allowlist', '' ) ),
 			esc_html__( 'Comma or newline separated IP addresses that always bypass maintenance mode.', 'bonsai-maintenance' )
 		);
-	}, 'cmm-settings', 'cmm_section_access' );
+	}, 'cmm-settings', 'cmm_section_access', [ 'label_for' => 'cmm_ip_allowlist' ] );
 
 	add_settings_field( 'cmm_site_password', __( 'Site Password', 'bonsai-maintenance' ), function () {
 		$is_set = '' !== get_option( 'cmm_site_password', '' );
@@ -918,7 +914,7 @@ add_action( 'admin_init', function () {
 				esc_html__( 'Remove password', 'bonsai-maintenance' )
 			);
 		}
-	}, 'cmm-settings', 'cmm_section_access' );
+	}, 'cmm-settings', 'cmm_section_access', [ 'label_for' => 'cmm_site_password' ] );
 
 	add_settings_field( 'cmm_password_days', __( 'Remember Password For', 'bonsai-maintenance' ), function () {
 		printf(
@@ -927,7 +923,7 @@ add_action( 'admin_init', function () {
 			esc_html__( 'days', 'bonsai-maintenance' ),
 			esc_html__( 'How long access lasts after entering the password. Use 0 to end access when the browser closes (maximum 24 hours).', 'bonsai-maintenance' )
 		);
-	}, 'cmm-settings', 'cmm_section_access' );
+	}, 'cmm-settings', 'cmm_section_access', [ 'label_for' => 'cmm_password_days' ] );
 
 	/*
 	 * Fields — Design
@@ -935,30 +931,30 @@ add_action( 'admin_init', function () {
 	 */
 	add_settings_field( 'cmm_logo', __( 'Header Logo', 'bonsai-maintenance' ), function () {
 		cmm_render_media_field( 'cmm_logo', get_option( 'cmm_logo', '' ) );
-	}, 'cmm-settings', 'cmm_section_design' );
+	}, 'cmm-settings', 'cmm_section_design', [ 'label_for' => 'cmm_logo' ] );
 
 	add_settings_field( 'cmm_background_image', __( 'Background Image', 'bonsai-maintenance' ), function () {
 		cmm_render_media_field( 'cmm_background_image', get_option( 'cmm_background_image', '' ) );
 		printf( '<p class="description">%s</p>', esc_html__( 'Full-page background image. Overrides the background colour below.', 'bonsai-maintenance' ) );
-	}, 'cmm-settings', 'cmm_section_design' );
+	}, 'cmm-settings', 'cmm_section_design', [ 'label_for' => 'cmm_background_image' ] );
 
 	add_settings_field( 'cmm_bg_colour', __( 'Background Colour', 'bonsai-maintenance' ), function () {
 		$val = sanitize_hex_color( get_option( 'cmm_bg_colour', '#ffffff' ) ) ?: '#ffffff';
 		printf(
-			'<input type="color" name="cmm_bg_colour" value="%s"><p class="description">%s</p>',
+			'<input type="color" name="cmm_bg_colour" id="cmm_bg_colour" value="%s"><p class="description">%s</p>',
 			esc_attr( $val ),
 			esc_html__( 'Page background colour. Used when no background image is set.', 'bonsai-maintenance' )
 		);
-	}, 'cmm-settings', 'cmm_section_design' );
+	}, 'cmm-settings', 'cmm_section_design', [ 'label_for' => 'cmm_bg_colour' ] );
 
 	add_settings_field( 'cmm_font_colour', __( 'Font Colour', 'bonsai-maintenance' ), function () {
 		$val = sanitize_hex_color( get_option( 'cmm_font_colour', '#111111' ) ) ?: '#111111';
 		printf(
-			'<input type="color" name="cmm_font_colour" value="%s"><p class="description">%s</p>',
+			'<input type="color" name="cmm_font_colour" id="cmm_font_colour" value="%s"><p class="description">%s</p>',
 			esc_attr( $val ),
 			esc_html__( 'Main text colour for headings, body copy, and social links.', 'bonsai-maintenance' )
 		);
-	}, 'cmm-settings', 'cmm_section_design' );
+	}, 'cmm-settings', 'cmm_section_design', [ 'label_for' => 'cmm_font_colour' ] );
 
 	/*
 	 * Fields — Content
@@ -970,17 +966,17 @@ add_action( 'admin_init', function () {
 			$val = __( 'Scheduled maintenance', 'bonsai-maintenance' );
 		}
 		printf(
-			'<input type="text" name="cmm_badge_text" value="%s" class="regular-text">',
+			'<input type="text" name="cmm_badge_text" id="cmm_badge_text" value="%s" class="regular-text">',
 			esc_attr( $val )
 		);
-	}, 'cmm-settings', 'cmm_section_content' );
+	}, 'cmm-settings', 'cmm_section_content', [ 'label_for' => 'cmm_badge_text' ] );
 
 	add_settings_field( 'cmm_header_text', __( 'Header Text', 'bonsai-maintenance' ), function () {
 		printf(
-			'<input type="text" name="cmm_header_text" value="%s" class="regular-text">',
+			'<input type="text" name="cmm_header_text" id="cmm_header_text" value="%s" class="regular-text">',
 			esc_attr( get_option( 'cmm_header_text', '' ) )
 		);
-	}, 'cmm-settings', 'cmm_section_content' );
+	}, 'cmm-settings', 'cmm_section_content', [ 'label_for' => 'cmm_header_text' ] );
 
 	add_settings_field( 'cmm_main_content', __( 'Main Content', 'bonsai-maintenance' ), function () {
 		wp_editor( get_option( 'cmm_main_content', '' ), 'cmm_main_content', [
@@ -1004,11 +1000,11 @@ add_action( 'admin_init', function () {
 
 	add_settings_field( 'cmm_footer_text', __( 'Footer Text', 'bonsai-maintenance' ), function () {
 		printf(
-			'<input type="text" name="cmm_footer_text" value="%s" class="regular-text"><p class="description">%s</p>',
+			'<input type="text" name="cmm_footer_text" id="cmm_footer_text" value="%s" class="regular-text"><p class="description">%s</p>',
 			esc_attr( get_option( 'cmm_footer_text', '' ) ),
-			esc_html__( 'Appears after the \u00a9 year. Leave blank to show year only.', 'bonsai-maintenance' )
+			esc_html__( 'Appears after the © year. Leave blank to show year only.', 'bonsai-maintenance' )
 		);
-	}, 'cmm-settings', 'cmm_section_content' );
+	}, 'cmm-settings', 'cmm_section_content', [ 'label_for' => 'cmm_footer_text' ] );
 
 	/*
 	 * Fields — Social
@@ -1023,11 +1019,11 @@ add_action( 'admin_init', function () {
 	foreach ( $social_fields as $key => $label ) {
 		add_settings_field( $key, $label, function () use ( $key ) {
 			printf(
-				'<input type="url" name="%s" value="%s" class="regular-text">',
+				'<input type="url" name="%1$s" id="%1$s" value="%2$s" class="regular-text">',
 				esc_attr( $key ),
 				esc_attr( get_option( $key, '' ) )
 			);
-		}, 'cmm-settings', 'cmm_section_social' );
+		}, 'cmm-settings', 'cmm_section_social', [ 'label_for' => $key ] );
 	}
 
 	/*
@@ -1036,19 +1032,19 @@ add_action( 'admin_init', function () {
 	 */
 	add_settings_field( 'cmm_seo_title', __( 'Page Title (SEO)', 'bonsai-maintenance' ), function () {
 		printf(
-			'<input type="text" name="cmm_seo_title" value="%s" class="regular-text" placeholder="%s">',
+			'<input type="text" name="cmm_seo_title" id="cmm_seo_title" value="%s" class="regular-text" placeholder="%s">',
 			esc_attr( get_option( 'cmm_seo_title', '' ) ),
-			esc_attr( get_bloginfo( 'name' ) . ' \u2013 ' . __( 'Scheduled Maintenance', 'bonsai-maintenance' ) )
+			esc_attr( get_bloginfo( 'name' ) . ' – ' . __( 'Scheduled Maintenance', 'bonsai-maintenance' ) )
 		);
-	}, 'cmm-settings', 'cmm_section_seo' );
+	}, 'cmm-settings', 'cmm_section_seo', [ 'label_for' => 'cmm_seo_title' ] );
 
 	add_settings_field( 'cmm_seo_description', __( 'Meta Description (SEO)', 'bonsai-maintenance' ), function () {
 		printf(
-			'<textarea name="cmm_seo_description" class="large-text" rows="3" maxlength="320" placeholder="%s">%s</textarea>',
+			'<textarea name="cmm_seo_description" id="cmm_seo_description" class="large-text" rows="3" maxlength="320" placeholder="%s">%s</textarea>',
 			esc_attr__( 'Optional short summary of the page', 'bonsai-maintenance' ),
 			esc_textarea( get_option( 'cmm_seo_description', '' ) )
 		);
-	}, 'cmm-settings', 'cmm_section_seo' );
+	}, 'cmm-settings', 'cmm_section_seo', [ 'label_for' => 'cmm_seo_description' ] );
 
 } );
 

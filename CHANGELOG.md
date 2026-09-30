@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.20] - 2026-09-30
+
 ### Added
 - [bonsai-maintenance.php] Site password (`cmm_site_password`) — visitors can click "Have a password?" on the maintenance page and enter a shared password to access the site. Stored hashed via `wp_hash_password()`; access is granted by an HttpOnly, HMAC-signed cookie tied to the current hash, so changing or removing the password revokes all existing access. Form is nonce-protected and throttled to 5 failed attempts per IP per 15 minutes.
 - [bonsai-maintenance.php] "Remember Password For" setting (`cmm_password_days`, default 7, 0 = browser session capped at 24 hours).
@@ -21,6 +23,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 -
 
 ---
+
+### Changed
+- [includes/admin-ui.php, assets/] Settings → Maintenance Mode restyled with the Bonsai admin design system: logo header with version, GitHub/changelog/"View site" links; each settings section (Status, Schedule, Preview & Access, Design, Content, Social Links, SEO) in its own card; the Status card shows whether maintenance mode is currently on. No option or field changes.
+- [bonsai-maintenance.php] Added `CMM_VERSION` and `CMM_URL` constants. `CMM_VERSION` must be kept in step with the `Version` header.
+- [assets/js/admin.js] Media-picker and preview-token JS moved out of inline `<script>`/`wp_add_inline_script()` into an enqueued jQuery file, loaded on the settings screen only.
+
+### Fixed
+- [bonsai-maintenance.php] The default maintenance page `<title>` showed a literal `\u2013` (single-quoted PHP string), e.g. "Site \u2013 Scheduled Maintenance". Same bug in the SEO title placeholder and the footer text help (`\u00a9`). Now real – and © characters.
+- [assets/js/admin.js] Preview tokens were generated with `Math.random()`; now `crypto.getRandomValues()`, since the token is what lets people bypass maintenance mode.
+- [bonsai-maintenance.php] Most fields had no `label_for`/`id`, so clicking a label didn't focus its input and screen readers didn't announce the label. Added throughout.
+- [bonsai-maintenance.php] Removed inline `style` attributes and the `onclick` handler from the media fields and preview link.
+- [bonsai-maintenance.php] Settings page callback now checks `manage_options` itself.
 
 ## [1.19] - 2026-08-17
 
