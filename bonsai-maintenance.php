@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Bonsai Digital Maintenance Mode
  * Description: Displays a customisable maintenance page for non-logged-in users, and can replace the standard WordPress maintenance screen.
- * Version: 1.20
+ * Version: 1.21
  * Author: Ben Ervine / The Bonsai Digital Collective
  * Author URI: https://thebonsaidigitalcollective.co.uk
  * Text Domain: bonsai-maintenance
@@ -13,10 +13,12 @@
 defined( 'ABSPATH' ) || exit;
 
 // Keep in step with the Version header above.
-define( 'CMM_VERSION', '1.20' );
+define( 'CMM_VERSION', '1.21' );
 define( 'CMM_URL', plugin_dir_url( __FILE__ ) );
 
-require_once plugin_dir_path( __FILE__ ) . 'includes/admin-ui.php';
+// Shared Bonsai admin menu, page shell and suite installer. Bundled copy of
+// the bonsai-hub repo; update it with bonsai-hub/bin/sync.sh, not by hand.
+require_once plugin_dir_path( __FILE__ ) . 'lib/bonsai-hub/bonsai-hub.php';
 
 /*
 |--------------------------------------------------------------------------
@@ -632,32 +634,87 @@ function cmm_render_maintenance_page( $args = [] ) {
 
 /*
 |--------------------------------------------------------------------------
-| Settings screen (Settings → Maintenance Mode)
+| Settings screen (Bonsai → Maintenance Mode)
 |--------------------------------------------------------------------------
 */
-add_action( 'admin_menu', function () {
-	add_options_page(
-		__( 'Maintenance Mode', 'bonsai-maintenance' ),
-		__( 'Maintenance Mode', 'bonsai-maintenance' ),
-		'manage_options',
-		'cmm-settings',
-		'cmm_settings_page'
-	);
-} );
 
 /**
- * Loads the Bonsai admin styles, the media library and the settings-screen
- * JS (media pickers, preview-token generator) on our settings screen only.
+ * Settings tabs, in display order. Each tab owns some settings sections and
+ * saves through its own option group: options.php blanks every option in a
+ * group that isn't in the submitted form, so tabs can't share one.
  *
- * @param string $hook_suffix Current admin page hook suffix.
+ * @return array<string, array{label: string, sections: string[]}>
  */
-add_action( 'admin_enqueue_scripts', function ( $hook_suffix ) {
-	if ( 'settings_page_cmm-settings' !== $hook_suffix ) {
-		return;
+function cmm_settings_tabs() {
+	return [
+		'status'  => [
+			'label'    => __( 'Status', 'bonsai-maintenance' ),
+			'sections' => [ 'cmm_section_status', 'cmm_section_schedule' ],
+		],
+		'access'  => [
+			'label'    => __( 'Preview & Access', 'bonsai-maintenance' ),
+			'sections' => [ 'cmm_section_access' ],
+		],
+		'design'  => [
+			'label'    => __( 'Design', 'bonsai-maintenance' ),
+			'sections' => [ 'cmm_section_design' ],
+		],
+		'content' => [
+			'label'    => __( 'Content & SEO', 'bonsai-maintenance' ),
+			'sections' => [ 'cmm_section_content', 'cmm_section_social', 'cmm_section_seo' ],
+		],
+	];
+}
+
+add_filter( 'bonsai_hub_modules', 'cmm_register_hub_module' );
+/**
+ * Registers the settings screen and its tabs under the shared Bonsai menu.
+ * Old options-general.php?page=cmm-settings links are redirected here by
+ * the hub.
+ *
+ * @param array $modules Modules registered so far.
+ * @return array
+ */
+function cmm_register_hub_module( $modules ) {
+	$tabs = [];
+
+	foreach ( cmm_settings_tabs() as $slug => $tab ) {
+		$tabs[ $slug ] = [
+			'label'  => $tab['label'],
+			'render' => static function () use ( $slug ) {
+				cmm_settings_page( $slug );
+			},
+		];
 	}
+
+	$modules['cmm-settings'] = [
+		'label'       => __( 'Maintenance Mode', 'bonsai-maintenance' ),
+		'title'       => __( 'Maintenance Mode Settings', 'bonsai-maintenance' ),
+		'description' => __( 'Shows a customisable maintenance page to logged-out visitors, with scheduling, preview links, an IP allowlist and an optional site password.', 'bonsai-maintenance' ),
+		'version'     => CMM_VERSION,
+		'repo'        => 'https://github.com/Bonsai-Systems/bonsai-maintenance',
+		'links'       => [
+			[
+				'label' => __( 'View site', 'bonsai-maintenance' ),
+				'url'   => home_url( '/' ),
+			],
+		],
+		'capability'  => 'manage_options',
+		'enqueue'     => 'cmm_admin_enqueue',
+		'tabs'        => $tabs,
+	];
+
+	return $modules;
+}
+
+/**
+ * Loads the media library and the settings-screen JS (media pickers,
+ * preview-token generator). Called by the hub on this plugin's screen only,
+ * after the shared Bonsai styles.
+ */
+function cmm_admin_enqueue() {
 	wp_enqueue_media();
-	cmm_enqueue_admin_ui();
-	wp_enqueue_style( 'cmm-admin', CMM_URL . 'assets/css/admin.css', [ 'cmm-bonsai-admin-ui' ], CMM_VERSION );
+	wp_enqueue_style( 'cmm-admin', CMM_URL . 'assets/css/admin.css', [ 'bonsai-hub-ui' ], CMM_VERSION );
 	wp_enqueue_script( 'cmm-admin', CMM_URL . 'assets/js/admin.js', [ 'jquery' ], CMM_VERSION, true );
 	wp_localize_script(
 		'cmm-admin',
@@ -667,7 +724,7 @@ add_action( 'admin_enqueue_scripts', function ( $hook_suffix ) {
 			'mediaButton' => __( 'Use this image', 'bonsai-maintenance' ),
 		]
 	);
-} );
+}
 
 /**
  * Renders a URL text field paired with a media-library picker button,
@@ -694,59 +751,50 @@ function cmm_render_media_field( $field_name, $value ) {
 }
 
 /**
- * Renders the settings page wrapper.
+ * Renders one settings tab: its sections, one card each, in a form that
+ * saves only that tab's option group. The hub prints the page wrap, header,
+ * notices and tabs around it, and has already checked manage_options.
+ *
+ * @param string $tab Tab slug from cmm_settings_tabs().
  */
-function cmm_settings_page() {
-	if ( ! current_user_can( 'manage_options' ) ) {
+function cmm_settings_page( $tab = 'status' ) {
+	global $wp_settings_sections;
+
+	$tabs = cmm_settings_tabs();
+	if ( ! isset( $tabs[ $tab ] ) ) {
 		return;
 	}
 
-	global $wp_settings_sections;
-
-	$sections = isset( $wp_settings_sections['cmm-settings'] ) ? (array) $wp_settings_sections['cmm-settings'] : [];
-	$active   = cmm_is_maintenance_active();
+	$registered = isset( $wp_settings_sections['cmm-settings'] ) ? (array) $wp_settings_sections['cmm-settings'] : [];
+	$sections   = array_intersect_key( $registered, array_flip( $tabs[ $tab ]['sections'] ) );
+	$active     = cmm_is_maintenance_active();
 	?>
-	<div class="wrap bonsai-ui bonsai-ui--narrow">
+	<form method="post" action="options.php">
+		<?php settings_fields( 'cmm_settings_' . $tab ); ?>
+
 		<?php
-		cmm_render_admin_header(
-			__( 'Maintenance Mode Settings', 'bonsai-maintenance' ),
-			__( 'Shows a customisable maintenance page to logged-out visitors, with scheduling, preview links, an IP allowlist and an optional site password.', 'bonsai-maintenance' ),
-			[
-				[
-					'label'    => __( 'View site', 'bonsai-maintenance' ),
-					'url'      => home_url( '/' ),
-					'external' => true,
-				],
-			]
-		);
-		?>
-		<form method="post" action="options.php">
-			<?php settings_fields( 'cmm_settings' ); ?>
-
-			<?php
-			// Same output as do_settings_sections(), but one card per section.
-			foreach ( $sections as $section ) :
-				?>
-				<section class="bonsai-ui-card" aria-labelledby="<?php echo esc_attr( $section['id'] ); ?>-title">
-					<div class="bonsai-ui-card__head">
-						<h2 class="bonsai-ui-card__title" id="<?php echo esc_attr( $section['id'] ); ?>-title"><?php echo esc_html( $section['title'] ); ?></h2>
-						<?php if ( 'cmm_section_status' === $section['id'] ) : ?>
-							<?php if ( $active ) : ?>
-								<span class="bonsai-ui-badge bonsai-ui-badge--warning"><?php esc_html_e( 'Maintenance mode is on', 'bonsai-maintenance' ); ?></span>
-							<?php else : ?>
-								<span class="bonsai-ui-badge bonsai-ui-badge--success"><?php esc_html_e( 'Site is live', 'bonsai-maintenance' ); ?></span>
-							<?php endif; ?>
+		// Same output as do_settings_sections(), but one card per section.
+		foreach ( $sections as $section ) :
+			?>
+			<section class="bonsai-ui-card" aria-labelledby="<?php echo esc_attr( $section['id'] ); ?>-title">
+				<div class="bonsai-ui-card__head">
+					<h2 class="bonsai-ui-card__title" id="<?php echo esc_attr( $section['id'] ); ?>-title"><?php echo esc_html( $section['title'] ); ?></h2>
+					<?php if ( 'cmm_section_status' === $section['id'] ) : ?>
+						<?php if ( $active ) : ?>
+							<span class="bonsai-ui-badge bonsai-ui-badge--warning"><?php esc_html_e( 'Maintenance mode is on', 'bonsai-maintenance' ); ?></span>
+						<?php else : ?>
+							<span class="bonsai-ui-badge bonsai-ui-badge--success"><?php esc_html_e( 'Site is live', 'bonsai-maintenance' ); ?></span>
 						<?php endif; ?>
-					</div>
-					<table class="form-table" role="presentation">
-						<?php do_settings_fields( 'cmm-settings', $section['id'] ); ?>
-					</table>
-				</section>
-			<?php endforeach; ?>
+					<?php endif; ?>
+				</div>
+				<table class="form-table" role="presentation">
+					<?php do_settings_fields( 'cmm-settings', $section['id'] ); ?>
+				</table>
+			</section>
+		<?php endforeach; ?>
 
-			<?php submit_button(); ?>
-		</form>
-	</div>
+		<?php submit_button(); ?>
+	</form>
 	<?php
 }
 
@@ -758,42 +806,42 @@ add_action( 'admin_init', function () {
 	 */
 
 	// Toggles.
-	register_setting( 'cmm_settings', 'cmm_enabled',                   [ 'type' => 'boolean', 'sanitize_callback' => 'cmm_sanitize_checkbox', 'default' => 0 ] );
-	register_setting( 'cmm_settings', 'cmm_override_wp_maintenance',    [ 'type' => 'boolean', 'sanitize_callback' => 'cmm_sanitize_checkbox', 'default' => 0 ] );
-	register_setting( 'cmm_settings', 'cmm_show_main_content',          [ 'type' => 'boolean', 'sanitize_callback' => 'cmm_sanitize_checkbox', 'default' => 1 ] );
+	register_setting( 'cmm_settings_status', 'cmm_enabled',                   [ 'type' => 'boolean', 'sanitize_callback' => 'cmm_sanitize_checkbox', 'default' => 0 ] );
+	register_setting( 'cmm_settings_status', 'cmm_override_wp_maintenance',    [ 'type' => 'boolean', 'sanitize_callback' => 'cmm_sanitize_checkbox', 'default' => 0 ] );
+	register_setting( 'cmm_settings_status', 'cmm_show_main_content',          [ 'type' => 'boolean', 'sanitize_callback' => 'cmm_sanitize_checkbox', 'default' => 1 ] );
 
 	// Schedule.
-	register_setting( 'cmm_settings', 'cmm_schedule_enabled', [ 'type' => 'boolean', 'sanitize_callback' => 'cmm_sanitize_checkbox',  'default' => 0 ] );
-	register_setting( 'cmm_settings', 'cmm_schedule_start',   [ 'type' => 'string',  'sanitize_callback' => 'cmm_sanitize_datetime', 'default' => '' ] );
-	register_setting( 'cmm_settings', 'cmm_schedule_end',     [ 'type' => 'string',  'sanitize_callback' => 'cmm_sanitize_datetime', 'default' => '' ] );
+	register_setting( 'cmm_settings_status', 'cmm_schedule_enabled', [ 'type' => 'boolean', 'sanitize_callback' => 'cmm_sanitize_checkbox',  'default' => 0 ] );
+	register_setting( 'cmm_settings_status', 'cmm_schedule_start',   [ 'type' => 'string',  'sanitize_callback' => 'cmm_sanitize_datetime', 'default' => '' ] );
+	register_setting( 'cmm_settings_status', 'cmm_schedule_end',     [ 'type' => 'string',  'sanitize_callback' => 'cmm_sanitize_datetime', 'default' => '' ] );
 
 	// Access.
-	register_setting( 'cmm_settings', 'cmm_preview_token', [ 'type' => 'string', 'sanitize_callback' => 'cmm_sanitize_line',     'default' => '' ] );
-	register_setting( 'cmm_settings', 'cmm_ip_allowlist',  [ 'type' => 'string', 'sanitize_callback' => 'cmm_sanitize_ip_list',  'default' => '' ] );
-	register_setting( 'cmm_settings', 'cmm_site_password', [ 'type' => 'string',  'sanitize_callback' => 'cmm_sanitize_site_password', 'default' => '' ] );
-	register_setting( 'cmm_settings', 'cmm_password_days', [ 'type' => 'integer', 'sanitize_callback' => 'cmm_sanitize_password_days', 'default' => 7 ] );
+	register_setting( 'cmm_settings_access', 'cmm_preview_token', [ 'type' => 'string', 'sanitize_callback' => 'cmm_sanitize_line',     'default' => '' ] );
+	register_setting( 'cmm_settings_access', 'cmm_ip_allowlist',  [ 'type' => 'string', 'sanitize_callback' => 'cmm_sanitize_ip_list',  'default' => '' ] );
+	register_setting( 'cmm_settings_access', 'cmm_site_password', [ 'type' => 'string',  'sanitize_callback' => 'cmm_sanitize_site_password', 'default' => '' ] );
+	register_setting( 'cmm_settings_access', 'cmm_password_days', [ 'type' => 'integer', 'sanitize_callback' => 'cmm_sanitize_password_days', 'default' => 7 ] );
 
 	// Design.
-	register_setting( 'cmm_settings', 'cmm_logo',             [ 'type' => 'string', 'sanitize_callback' => 'esc_url_raw',        'default' => '' ] );
-	register_setting( 'cmm_settings', 'cmm_background_image', [ 'type' => 'string', 'sanitize_callback' => 'esc_url_raw',        'default' => '' ] );
-	register_setting( 'cmm_settings', 'cmm_bg_colour',        [ 'type' => 'string', 'sanitize_callback' => 'sanitize_hex_color', 'default' => '#ffffff' ] );
-	register_setting( 'cmm_settings', 'cmm_font_colour',      [ 'type' => 'string', 'sanitize_callback' => 'sanitize_hex_color', 'default' => '#111111' ] );
+	register_setting( 'cmm_settings_design', 'cmm_logo',             [ 'type' => 'string', 'sanitize_callback' => 'esc_url_raw',        'default' => '' ] );
+	register_setting( 'cmm_settings_design', 'cmm_background_image', [ 'type' => 'string', 'sanitize_callback' => 'esc_url_raw',        'default' => '' ] );
+	register_setting( 'cmm_settings_design', 'cmm_bg_colour',        [ 'type' => 'string', 'sanitize_callback' => 'sanitize_hex_color', 'default' => '#ffffff' ] );
+	register_setting( 'cmm_settings_design', 'cmm_font_colour',      [ 'type' => 'string', 'sanitize_callback' => 'sanitize_hex_color', 'default' => '#111111' ] );
 
 	// Content.
-	register_setting( 'cmm_settings', 'cmm_badge_text',   [ 'type' => 'string', 'sanitize_callback' => 'cmm_sanitize_line', 'default' => '' ] );
-	register_setting( 'cmm_settings', 'cmm_header_text',  [ 'type' => 'string', 'sanitize_callback' => 'cmm_sanitize_line', 'default' => '' ] );
-	register_setting( 'cmm_settings', 'cmm_main_content', [ 'type' => 'string', 'sanitize_callback' => 'wp_kses_post',      'default' => '' ] );
-	register_setting( 'cmm_settings', 'cmm_embed_content',[ 'type' => 'string', 'sanitize_callback' => 'wp_kses_post',      'default' => '' ] );
-	register_setting( 'cmm_settings', 'cmm_footer_text',  [ 'type' => 'string', 'sanitize_callback' => 'cmm_sanitize_line', 'default' => '' ] );
+	register_setting( 'cmm_settings_content', 'cmm_badge_text',   [ 'type' => 'string', 'sanitize_callback' => 'cmm_sanitize_line', 'default' => '' ] );
+	register_setting( 'cmm_settings_content', 'cmm_header_text',  [ 'type' => 'string', 'sanitize_callback' => 'cmm_sanitize_line', 'default' => '' ] );
+	register_setting( 'cmm_settings_content', 'cmm_main_content', [ 'type' => 'string', 'sanitize_callback' => 'wp_kses_post',      'default' => '' ] );
+	register_setting( 'cmm_settings_content', 'cmm_embed_content',[ 'type' => 'string', 'sanitize_callback' => 'wp_kses_post',      'default' => '' ] );
+	register_setting( 'cmm_settings_content', 'cmm_footer_text',  [ 'type' => 'string', 'sanitize_callback' => 'cmm_sanitize_line', 'default' => '' ] );
 
 	// Social.
-	register_setting( 'cmm_settings', 'cmm_facebook',  [ 'type' => 'string', 'sanitize_callback' => 'esc_url_raw', 'default' => '' ] );
-	register_setting( 'cmm_settings', 'cmm_instagram', [ 'type' => 'string', 'sanitize_callback' => 'esc_url_raw', 'default' => '' ] );
-	register_setting( 'cmm_settings', 'cmm_linkedin',  [ 'type' => 'string', 'sanitize_callback' => 'esc_url_raw', 'default' => '' ] );
+	register_setting( 'cmm_settings_content', 'cmm_facebook',  [ 'type' => 'string', 'sanitize_callback' => 'esc_url_raw', 'default' => '' ] );
+	register_setting( 'cmm_settings_content', 'cmm_instagram', [ 'type' => 'string', 'sanitize_callback' => 'esc_url_raw', 'default' => '' ] );
+	register_setting( 'cmm_settings_content', 'cmm_linkedin',  [ 'type' => 'string', 'sanitize_callback' => 'esc_url_raw', 'default' => '' ] );
 
 	// SEO.
-	register_setting( 'cmm_settings', 'cmm_seo_title',       [ 'type' => 'string', 'sanitize_callback' => 'cmm_sanitize_line',     'default' => '' ] );
-	register_setting( 'cmm_settings', 'cmm_seo_description', [ 'type' => 'string', 'sanitize_callback' => 'cmm_sanitize_meta_desc','default' => '' ] );
+	register_setting( 'cmm_settings_content', 'cmm_seo_title',       [ 'type' => 'string', 'sanitize_callback' => 'cmm_sanitize_line',     'default' => '' ] );
+	register_setting( 'cmm_settings_content', 'cmm_seo_description', [ 'type' => 'string', 'sanitize_callback' => 'cmm_sanitize_meta_desc','default' => '' ] );
 
 	/*
 	 * Sections

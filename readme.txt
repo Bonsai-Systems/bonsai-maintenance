@@ -36,11 +36,11 @@ Bonsai Digital Maintenance Mode shows a friendly, customisable maintenance page 
 
 1. Upload the plugin folder `bonsai-maintenance` to the `/wp-content/plugins/` directory, or install via the Plugins screen.
 2. Activate the plugin through the 'Plugins' screen in WordPress.
-3. Navigate to **Settings → Maintenance Mode** to configure.
+3. Navigate to **Bonsai → Maintenance Mode** to configure.
 
 == Quick Start ==
 
-1. Go to **Settings → Maintenance Mode**.
+1. Go to **Bonsai → Maintenance Mode**.
 2. Tick **Enable Maintenance Mode**.
 3. (Optional) Add a **Background Image (URL)**.
 4. Set **Background Colour** and **Font Colour** to match your brand.

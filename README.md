@@ -65,7 +65,7 @@ Dependencies are managed via Composer. The `vendor/` directory should be built b
 
 ## Settings Reference
 
-Navigate to **Settings → Maintenance Mode** to configure.
+Navigate to **Bonsai → Maintenance Mode** to configure.
 
 ### Status
 | Option | Key | Description |
@@ -148,6 +148,14 @@ bonsai-maintenance/
 ```
 
 ---
+
+## Bonsai menu
+
+This plugin's screens live in the shared **Bonsai** admin menu, provided by [Bonsai Hub](https://github.com/Bonsai-Systems/bonsai-hub). A copy of the hub is bundled in `lib/bonsai-hub/`, so this plugin sets up the menu on its own. Other Bonsai plugins appear alongside it, and **Bonsai → Plugins** installs, activates and deactivates the rest of the suite.
+
+- Don't edit `lib/bonsai-hub/` by hand. Change the bonsai-hub repo and run its `bin/sync.sh`.
+- Old `options-general.php?page=cmm-settings` links redirect to the new screen.
+- Release zips must include `lib/`.
 
 ## Updates
 

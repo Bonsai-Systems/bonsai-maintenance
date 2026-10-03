@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.21] - 2026-10-03
+
+### Added
+- [lib/bonsai-hub/] Bundled Bonsai Hub 1.0.0: a shared top-level **Bonsai** admin menu with a left-hand nav for every Bonsai plugin, plus a **Plugins** screen to install, activate and deactivate the rest of the suite from GitHub releases.
+
+### Changed
+- [bonsai-maintenance.php] Settings moved from **Settings → Maintenance Mode** to **Bonsai → Maintenance Mode** (`admin.php?page=cmm-settings`) and split into tabs: Status (status and schedule), Preview & Access, Design, and Content & SEO. Old `options-general.php` links redirect.
+- [bonsai-maintenance.php] Each tab saves through its own option group (`cmm_settings_status`, `_access`, `_design`, `_content`) so saving one tab can't blank another's fields. Option names and stored values are unchanged.
+
+### Removed
+- [includes/admin-ui.php, assets/] Per-plugin header and design-system copy. The hub now provides both.
+
 ## [1.20] - 2026-09-30
 
 ### Added
