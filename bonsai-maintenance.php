@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Bonsai Digital Maintenance Mode
  * Description: Displays a customisable maintenance page for non-logged-in users, and can replace the standard WordPress maintenance screen.
- * Version: 1.21
+ * Version: 1.22
  * Author: Ben Ervine / The Bonsai Digital Collective
  * Author URI: https://thebonsaidigitalcollective.co.uk
  * Text Domain: bonsai-maintenance
@@ -13,7 +13,7 @@
 defined( 'ABSPATH' ) || exit;
 
 // Keep in step with the Version header above.
-define( 'CMM_VERSION', '1.21' );
+define( 'CMM_VERSION', '1.22' );
 define( 'CMM_URL', plugin_dir_url( __FILE__ ) );
 
 // Shared Bonsai admin menu, page shell and suite installer. Bundled copy of
