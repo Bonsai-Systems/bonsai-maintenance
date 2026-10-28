@@ -708,14 +708,14 @@ function cmm_register_hub_module( $modules ) {
 }
 
 /**
- * Loads the media library and the settings-screen JS (media pickers,
- * preview-token generator). Called by the hub on this plugin's screen only,
- * after the shared Bonsai styles.
+ * Loads the media library, the core colour picker and the settings-screen JS
+ * (media pickers, colour pickers, preview-token generator). Called by the hub
+ * on this plugin's screen only, after the shared Bonsai styles.
  */
 function cmm_admin_enqueue() {
 	wp_enqueue_media();
-	wp_enqueue_style( 'cmm-admin', CMM_URL . 'assets/css/admin.css', [ 'bonsai-hub-ui' ], CMM_VERSION );
-	wp_enqueue_script( 'cmm-admin', CMM_URL . 'assets/js/admin.js', [ 'jquery' ], CMM_VERSION, true );
+	wp_enqueue_style( 'cmm-admin', CMM_URL . 'assets/css/admin.css', [ 'bonsai-hub-ui', 'wp-color-picker' ], CMM_VERSION );
+	wp_enqueue_script( 'cmm-admin', CMM_URL . 'assets/js/admin.js', [ 'jquery', 'wp-color-picker' ], CMM_VERSION, true );
 	wp_localize_script(
 		'cmm-admin',
 		'cmmAdmin',
@@ -989,7 +989,7 @@ add_action( 'admin_init', function () {
 	add_settings_field( 'cmm_bg_colour', __( 'Background Colour', 'bonsai-maintenance' ), function () {
 		$val = sanitize_hex_color( get_option( 'cmm_bg_colour', '#ffffff' ) ) ?: '#ffffff';
 		printf(
-			'<input type="color" name="cmm_bg_colour" id="cmm_bg_colour" value="%s"><p class="description">%s</p>',
+			'<input type="text" class="cmm-colour-picker" name="cmm_bg_colour" id="cmm_bg_colour" value="%s" data-default-color="#ffffff"><p class="description">%s</p>',
 			esc_attr( $val ),
 			esc_html__( 'Page background colour. Used when no background image is set.', 'bonsai-maintenance' )
 		);
@@ -998,7 +998,7 @@ add_action( 'admin_init', function () {
 	add_settings_field( 'cmm_font_colour', __( 'Font Colour', 'bonsai-maintenance' ), function () {
 		$val = sanitize_hex_color( get_option( 'cmm_font_colour', '#111111' ) ) ?: '#111111';
 		printf(
-			'<input type="color" name="cmm_font_colour" id="cmm_font_colour" value="%s"><p class="description">%s</p>',
+			'<input type="text" class="cmm-colour-picker" name="cmm_font_colour" id="cmm_font_colour" value="%s" data-default-color="#111111"><p class="description">%s</p>',
 			esc_attr( $val ),
 			esc_html__( 'Main text colour for headings, body copy, and social links.', 'bonsai-maintenance' )
 		);

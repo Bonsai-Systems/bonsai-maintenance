@@ -17,9 +17,3 @@
 .bonsai-ui [hidden] {
 	display: none !important;
 }
-
-.bonsai-ui input[type="color"] {
-	width: 64px;
-	height: 36px;
-	padding: 2px;
-}

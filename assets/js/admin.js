@@ -1,11 +1,16 @@
 /**
- * Settings → Maintenance Mode: media pickers and the preview-token generator.
+ * Settings → Maintenance Mode: media pickers, colour pickers and the
+ * preview-token generator.
  * Enqueued on that screen only.
  */
 ( function ( $ ) {
 	'use strict';
 
 	var strings = window.cmmAdmin || {};
+
+	$( function () {
+		$( '.cmm-colour-picker' ).wpColorPicker();
+	} );
 
 	$( document ).on( 'click', '.cmm-media-select', function ( e ) {
 		e.preventDefault();

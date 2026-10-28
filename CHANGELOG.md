@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- [bonsai-maintenance.php, assets/] Background and font colour fields now use the core WordPress colour picker (`wp-color-picker`) with a hex text field and a Default button, replacing the browser's native `<input type="color">`. Option names and stored values are unchanged.
+
 ## [1.22] - 2026-10-05
 
 ### Changed
