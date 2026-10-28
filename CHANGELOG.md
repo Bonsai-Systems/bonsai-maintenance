@@ -37,16 +37,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - [bonsai-maintenance.php] `cmm_render_maintenance_page()` now accepts an `$args` array; the password form is only rendered on live requests, never in the static `maintenance-template.html` snapshot.
-
-### Fixed
--
-
-### Removed
--
-
----
-
-### Changed
 - [includes/admin-ui.php, assets/] Settings → Maintenance Mode restyled with the Bonsai admin design system: logo header with version, GitHub/changelog/"View site" links; each settings section (Status, Schedule, Preview & Access, Design, Content, Social Links, SEO) in its own card; the Status card shows whether maintenance mode is currently on. No option or field changes.
 - [bonsai-maintenance.php] Added `CMM_VERSION` and `CMM_URL` constants. `CMM_VERSION` must be kept in step with the `Version` header.
 - [assets/js/admin.js] Media-picker and preview-token JS moved out of inline `<script>`/`wp_add_inline_script()` into an enqueued jQuery file, loaded on the settings screen only.

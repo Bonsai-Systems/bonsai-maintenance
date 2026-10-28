@@ -123,6 +123,26 @@ Bonsai Digital Maintenance Mode shows a friendly, customisable maintenance page 
 
 == Changelog ==
 
+= 1.23 =
+* Change: Background and font colour fields now use the standard WordPress colour picker, with a hex field and a Default button, in place of the browser's native colour input. Saved colours are unchanged.
+
+= 1.22 =
+* Change: The Bonsai admin menu now sits directly below Dashboard (bundled Bonsai Hub 1.0.1).
+
+= 1.21 =
+* Add: Bundled Bonsai Hub — a shared top-level Bonsai admin menu for every Bonsai plugin, plus a Plugins screen to install, activate and deactivate the rest of the suite from GitHub releases.
+* Change: Settings moved from Settings → Maintenance Mode to Bonsai → Maintenance Mode and split into tabs: Status, Preview & Access, Design, and Content & SEO. Old links redirect.
+* Change: Each tab saves separately, so saving one tab can't blank another's fields. Option names and stored values are unchanged.
+
+= 1.20 =
+* Add: Site password — visitors can click "Have a password?" on the maintenance page and enter a shared password to access the site. Stored hashed; changing or removing the password revokes all existing access. Throttled to 5 failed attempts per IP per 15 minutes.
+* Add: "Remember Password For" setting (default 7 days; 0 = browser session, capped at 24 hours).
+* Change: Settings screen restyled with the Bonsai admin design system, each section in its own card. No option changes.
+* Fix: The default maintenance page title, SEO title placeholder and footer help text showed raw Unicode escape codes instead of dash and copyright characters.
+* Fix: Preview tokens now generated with `crypto.getRandomValues()` instead of `Math.random()`.
+* Fix: Field labels now linked to their inputs for keyboard and screen-reader users.
+* Fix: Settings page now checks the `manage_options` capability itself.
+
 = 1.19 =
 * Fix: Static maintenance page was being regenerated (13 `get_option()` calls plus a file write) on every front-end page load instead of only after a settings change. Regeneration is now gated to `cmm_*` option saves.
 
